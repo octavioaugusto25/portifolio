@@ -80,7 +80,7 @@ export default function App() {
   },[fetchExternal]);
 
   // ── Fetch FDV ──
-const fdvCacheRef = React.useRef({ ts: 0, data: {} });
+const fdvCacheRef = useRef({ ts: 0, data: {} });
   const fetchFdv = useCallback(async () => {
     const now = Date.now();
     if (now - fdvCacheRef.current.ts < 10 * 60 * 1000 && Object.keys(fdvCacheRef.current.data).length) {
@@ -109,7 +109,7 @@ const fdvCacheRef = React.useRef({ ts: 0, data: {} });
  
   // ── Fetch Volatility — DeFiLlama /chart, 1 coin por vez, só 3 principais ──
   // DeFiLlama /chart só aceita UM coin no path. Batch não funciona (400).
-  const volCacheRef = React.useRef({ ts: 0, data: {} });
+  const volCacheRef = useRef({ ts: 0, data: {} });
   const fetchVolatility = useCallback(async () => {
     // Cache de 30 min — vol histórica não muda em minutos
     const now = Date.now();
