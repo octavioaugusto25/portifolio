@@ -69,7 +69,7 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:"14px"}}>
       <Card>
-        <SecTitle icon="🧷" sub="Cole seu endereço para buscar posições LP ativas (Uniswap v3)">Carteira on-chain</SecTitle>
+        <SecTitle icon="🧷" sub="Cole seu endereço para buscar posições LP ativas (Uniswap v3 + fallbacks DeBank)">Carteira on-chain</SecTitle>
         <div style={{display:"flex",gap:"8px",marginBottom:"10px"}}>
           <input
             value={walletAddress}
@@ -79,14 +79,14 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
           />
           <button onClick={()=>onFetchWalletPools?.(walletAddress)} style={{padding:"8px 12px",borderRadius:"7px",fontSize:"10px",background:"rgba(99,102,241,0.15)",border:"1px solid rgba(99,102,241,0.3)",color:"#a5b4fc",cursor:"pointer",fontFamily:"monospace"}}>Buscar pools ativas</button>
         </div>
-        {walletLoading&&<div style={{fontSize:"10px",color:"#475569"}}>Buscando posições on-chain...</div>}
+        {walletLoading&&<div style={{fontSize:"10px",color:"#475569"}}>Buscando posições on-chain e em agregadores...</div>}
         {!walletLoading && walletPools.length>0 && (
           <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
             {walletPools.map(wp=>(
               <div key={wp.id} style={{padding:"8px",borderRadius:"7px",background:"rgba(0,0,0,0.2)",display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"center"}}>
                 <div>
                   <div style={{fontSize:"11px",fontWeight:700,color:"#94a3b8"}}>{wp.symbol} <span style={{fontSize:"9px",color:"#334155"}}>fee {wp.feeTier}</span></div>
-                  <div style={{fontSize:"9px",color:"#334155"}}>TVL ${fmt(wp.tvlUsd,0)} · Match local: {wp.matchedPool?`Score ${wp.matchedPool._score}`:"não encontrado"}</div>
+                  <div style={{fontSize:"9px",color:"#334155"}}>Origem: {wp.source || "wallet"} · TVL ${fmt(wp.tvlUsd,0)} · Match local: {wp.matchedPool?`Score ${wp.matchedPool._score}`:"não encontrado"}</div>
                 </div>
                 <button onClick={()=>setRebuildAdvice(onSuggestRebuild?.(wp.matchedPool||null)||null)} style={{padding:"5px 9px",borderRadius:"6px",fontSize:"9px",background:"rgba(34,197,94,0.12)",border:"1px solid rgba(34,197,94,0.3)",color:"#22c55e",cursor:"pointer"}}>Estratégia remontar</button>
               </div>

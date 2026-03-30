@@ -11,6 +11,7 @@ export const DUNE_API = "https://api.dune.com/api/v1";
 export const CERTIK_API = "https://www.certik.com/";
 export const DEFISAFETY_API = "https://www.defisafety.com/";
 export const ETH_RPC = "https://eth.llamarpc.com";
+export const DEBANK_PRO_API = "https://pro-openapi.debank.com/v1";
 export const UNISWAP_V3_NPM = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88";
 export const TOKEN_SYMBOL_BY_ADDRESS = {
   "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": "WETH",

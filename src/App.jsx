@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AAVE_API, BALANCER_API, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, ETH_RPC, PROTOCOL_COIN_MAP, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_ALT, UNISWAP_SUBGRAPH, UNISWAP_V3_NPM } from "./constants";
+import { AAVE_API, BALANCER_API, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEBANK_PRO_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, ETH_RPC, PROTOCOL_COIN_MAP, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_ALT, UNISWAP_SUBGRAPH, UNISWAP_V3_NPM } from "./constants";
 import { buildPoolIntelligence, calcFdvRevenueRatio, calcHistoricalVolatility, calcLiquidityScore, calcScore, detectNarratives, fmt, getAuditEntry, getMarketContext, getProtocolCoinId, getVolLabel, isPairSS, isPairSV, normalizePoolModel, suggestRebuildStrategy } from "./utils";
 import { Badge, CalcTab, Card, Chg, LiquidezTab, PlanTab, PoolModal, PoolRow, PortfolioTab, Spin, StatusDot, StrategiesTab, VolatilityTab, AIAdvisorTab } from "./ui";
 
@@ -144,6 +144,66 @@ export default function App() {
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) return [];
     setWalletLoading(true);
     const owner = walletAddress.toLowerCase();
+    const debankAccessKey = import.meta.env.VITE_DEBANK_ACCESS_KEY;
+    const chainLabelMap = { eth: "Ethereum", arb: "Arbitrum", base: "Base", op: "Optimism", matic: "Polygon", bsc: "BSC", avax: "Avalanche", sol: "Solana" };
+    const scoreLocalMatch = (symbol = "", project = "") => {
+      const symbolNorm = symbol.toUpperCase().replace(/_/g, "/");
+      const projectNorm = project.toLowerCase();
+      return allPools.find(p => {
+        const poolSymbol = p.symbol?.toUpperCase().replace(/_/g, "/") || "";
+        const poolProject = p.project?.toLowerCase() || "";
+        return (symbolNorm && (poolSymbol.includes(symbolNorm) || symbolNorm.includes(poolSymbol))) || (projectNorm && poolProject.includes(projectNorm));
+      }) || null;
+    };
+    const collectDebankTokens = (item = {}) => {
+      const groups = [
+        item.detail?.supply_token_list,
+        item.detail?.borrow_token_list,
+        item.detail?.reward_token_list,
+        item.detail?.token_list,
+        item.supply_token_list,
+        item.borrow_token_list,
+        item.reward_token_list,
+        item.token_list,
+      ].filter(Array.isArray);
+      const symbols = groups.flat().map(token => token?.optimized_symbol || token?.display_symbol || token?.symbol || "").filter(Boolean);
+      return [...new Set(symbols)];
+    };
+    const toDebankPosition = (item = {}, protocol = {}) => {
+      const tokens = collectDebankTokens(item);
+      const symbol = tokens.length >= 2 ? `${tokens[0]}/${tokens[1]}` : tokens[0] || item.name || protocol.name || "Unknown";
+      const project = protocol.name || item.protocol || "DeBank";
+      return {
+        id: item.id || `${protocol.id || project}-${item.name || symbol}-${item.chain || protocol.chain || "unknown"}`,
+        symbol,
+        feeTier: item.detail?.trading_fee || item.detail?.fee_rate || item.detail?.fee_tier || "-",
+        liquidity: item.stats?.asset_usd_value || item.stats?.net_usd_value || item.stats?.deposit_usd_value || 0,
+        tvlUsd: Number(item.stats?.asset_usd_value || item.stats?.net_usd_value || item.stats?.deposit_usd_value || 0),
+        volumeUsd: Number(item.stats?.daily_volume || item.stats?.volume_usd_24h || 0),
+        protocol: project,
+        chain: chainLabelMap[item.chain || protocol.chain] || item.chain || protocol.chain || "Unknown",
+        source: "DeBank",
+        matchedPool: scoreLocalMatch(symbol, project),
+      };
+    };
+    const parseDebankPositions = (protocols = []) => {
+      const items = [];
+      for (const protocol of protocols) {
+        const portfolioItems = protocol.portfolio_item_list || protocol.portfolio_item_array || [];
+        for (const item of portfolioItems) {
+          const detailTypes = [
+            ...(item.detail_types || []),
+            ...(item.detail?.detail_types || []),
+            item.type,
+            item.detail?.type,
+            item.name,
+          ].filter(Boolean).join(" ").toLowerCase();
+          if (!/(liquidity|liquidity_pool|lp|farm|stake)/.test(detailTypes)) continue;
+          items.push(toDebankPosition(item, protocol));
+        }
+      }
+      return items.filter(item => item.symbol && item.tvlUsd > 0);
+    };
     const query = `{
       positions(first: 30, where: { owner: "${owner}", liquidity_gt: "0" }) {
         id
@@ -170,7 +230,6 @@ export default function App() {
         if (positions.length) {
           const mapped = positions.map(pos => {
             const symbol = `${pos.pool?.token0?.symbol || "?"}/${pos.pool?.token1?.symbol || "?"}`;
-            const localMatch = allPools.find(p => p.symbol?.toUpperCase().replace(/_/g, "/").includes(symbol.toUpperCase()));
             return {
               id: pos.id,
               symbol,
@@ -178,7 +237,8 @@ export default function App() {
               liquidity: pos.liquidity,
               tvlUsd: Number(pos.pool?.totalValueLockedUSD || 0),
               volumeUsd: Number(pos.pool?.volumeUSD || 0),
-              matchedPool: localMatch || null,
+              source: "Uniswap subgraph",
+              matchedPool: scoreLocalMatch(symbol, "uniswap"),
             };
           });
           setWalletPools(mapped);
@@ -217,13 +277,33 @@ export default function App() {
         const s0 = TOKEN_SYMBOL_BY_ADDRESS[token0] || `${token0.slice(0, 6)}…`;
         const s1 = TOKEN_SYMBOL_BY_ADDRESS[token1] || `${token1.slice(0, 6)}…`;
         const symbol = `${s0}/${s1}`;
-        const localMatch = allPools.find(p => p.symbol?.toUpperCase().replace(/_/g, "/").includes(symbol.toUpperCase()));
-        fallback.push({ id: tokenId.toString(), symbol, feeTier: fee, liquidity: liquidity.toString(), tvlUsd: 0, volumeUsd: 0, matchedPool: localMatch || null });
+        fallback.push({ id: tokenId.toString(), symbol, feeTier: fee, liquidity: liquidity.toString(), tvlUsd: 0, volumeUsd: 0, source: "Uniswap on-chain", matchedPool: scoreLocalMatch(symbol, "uniswap") });
       }
-      setWalletPools(fallback);
-      setWalletLoading(false);
-      return fallback;
+      if (fallback.length > 0) {
+        setWalletPools(fallback);
+        setWalletLoading(false);
+        return fallback;
+      }
     } catch {/* noop */}
+    if (debankAccessKey) {
+      for (const url of [
+        `${DEBANK_PRO_API}/user/all_complex_protocol_list?id=${owner}`,
+        `${DEBANK_PRO_API}/user/all_simple_protocol_list?id=${owner}`,
+      ]) {
+        try {
+          const r = await fetchExternal(url, { headers: { AccessKey: debankAccessKey, accept: "application/json" } });
+          if (!r.ok) continue;
+          const data = await r.json();
+          const protocols = Array.isArray(data) ? data : data?.data || [];
+          const parsed = parseDebankPositions(protocols);
+          if (parsed.length > 0) {
+            setWalletPools(parsed);
+            setWalletLoading(false);
+            return parsed;
+          }
+        } catch {/* noop */}
+      }
+    }
     setWalletPools([]);
     setWalletLoading(false);
     return [];
