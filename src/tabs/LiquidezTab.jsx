@@ -12,6 +12,12 @@ export function LiquidezTab({pools, fdvData, dataStatus}) {
     return {proto,coinId,fdv:fd.fdv,marketCap:fd.marketCap,tvl:totalTvl,ratio:totalTvl>0?fd.fdv/totalTvl:null};
   }).filter(Boolean).sort((a,b)=>(a.ratio||999)-(b.ratio||999)).slice(0,12);
   const auditList = Object.entries(AUDIT_PROXY).sort((a,b)=>b[1].score-a[1].score).slice(0,16);
+  const ratioTxt = (r) => {
+    if (!r && r !== 0) return "—";
+    if (r < 0.1) return `${r.toFixed(3)}x`;
+    if (r < 1) return `${r.toFixed(2)}x`;
+    return `${r.toFixed(1)}x`;
+  };
   return (
     <div style={{display:"flex",flexDirection:"column",gap:"14px"}}>
       <Card>
@@ -58,6 +64,10 @@ export function LiquidezTab({pools, fdvData, dataStatus}) {
       </Card>
       <Card>
         <SecTitle icon="📊" sub="FDV/TVL — quanto o mercado paga por $ de liquidez">Valuation Engine — FDV vs TVL</SecTitle>
+        <div style={{fontSize:"10px",color:"#64748b",lineHeight:1.6,marginBottom:"10px"}}>
+          Regra rápida: <strong style={{color:"#22c55e"}}>&lt;1x = descontado</strong>, <strong style={{color:"#f59e0b"}}>1–5x = faixa justa</strong>, <strong style={{color:"#f97316"}}>5x+ = premium</strong>. <br/>
+          Exemplo: <span style={{fontFamily:"monospace"}}>0.30x</span> = o mercado paga $0,30 de FDV para cada $1 de TVL.
+        </div>
         {dataStatus.fdv==="loading"?<div style={{textAlign:"center",padding:"30px"}}><Spin size={18}/></div>:valuation.length===0?<div style={{textAlign:"center",padding:"20px",fontSize:"11px",color:"#334155"}}>FDV indisponível</div>:(
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px"}}>
             {valuation.map(v=>{
@@ -66,7 +76,7 @@ export function LiquidezTab({pools, fdvData, dataStatus}) {
                 <div key={v.proto} style={{padding:"10px",background:"rgba(0,0,0,0.2)",borderRadius:"8px",border:`1px solid ${rat.color}18`}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"4px"}}><span style={{fontSize:"11px",fontWeight:700,color:"#94a3b8",textTransform:"capitalize"}}>{v.proto}</span><Badge color={rat.color} sm>{rat.label}</Badge></div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"4px"}}>
-                    {[{l:"FDV",v:fmtK(v.fdv),c:"#a5b4fc"},{l:"TVL",v:fmtK(v.tvl),c:"#3b82f6"},{l:"Ratio",v:v.ratio?`${v.ratio.toFixed(1)}x`:"—",c:rat.color}].map(m=>(
+                    {[{l:"FDV",v:fmtK(v.fdv),c:"#a5b4fc"},{l:"TVL",v:fmtK(v.tvl),c:"#3b82f6"},{l:"FDV/TVL",v:ratioTxt(v.ratio),c:rat.color}].map(m=>(
                       <div key={m.l} style={{textAlign:"center"}}><div style={{fontSize:"10px",fontWeight:700,color:m.c,fontFamily:"monospace"}}>{m.v}</div><div style={{fontSize:"8px",color:"#2d3748"}}>{m.l}</div></div>
                     ))}
                   </div>
@@ -78,6 +88,9 @@ export function LiquidezTab({pools, fdvData, dataStatus}) {
       </Card>
       <Card>
         <SecTitle icon="🛡" sub="Proxy baseado em auditorias públicas conhecidas">Audit Score Proxy</SecTitle>
+        <div style={{fontSize:"10px",color:"#64748b",lineHeight:1.6,marginBottom:"10px"}}>
+          Leitura: <strong style={{color:"#22c55e"}}>score alto + 💰 bounty</strong> tende a ser mais defensivo; <strong style={{color:"#ef4444"}}>⚠</strong> indica hack histórico.
+        </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px"}}>
           {auditList.map(([proto,a])=>{
             const c=a.score>=85?"#22c55e":a.score>=70?"#f59e0b":a.score>=55?"#f97316":"#ef4444";
@@ -94,4 +107,3 @@ export function LiquidezTab({pools, fdvData, dataStatus}) {
     </div>
   );
 }
-
