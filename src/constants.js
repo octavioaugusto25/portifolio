@@ -187,21 +187,24 @@ export const PROTOCOL_COIN_MAP = {
 // Maps token symbol → CoinGecko coin ID.
 // Used in PoolRow / PoolModal as secondary key when DeFiLlama vol is unavailable.
 export const VOLATILITY_COIN_MAP = {
-  "ETH":   "ethereum",
-  "BTC":   "bitcoin",
-  "SOL":   "solana",
-  "BNB":   "binancecoin",
-  "ARB":   "arbitrum",
-  "OP":    "optimism",
-  "AVAX":  "avalanche-2",
-  "MATIC": "matic-network",
-  "UNI":   "uniswap",
-  "AAVE":  "aave",
-  "CRV":   "curve-dao-token",
-  "GMX":   "gmx",
-  "PENDLE":"pendle",
-  "LINK":  "chainlink",
-  "LDO":   "lido-dao",
+  "ETH":    "ethereum",
+  "BTC":    "bitcoin",
+  "SOL":    "solana",
+  "BNB":    "binancecoin",
+  "ARB":    "arbitrum",
+  "OP":     "optimism",
+  "AVAX":   "avalanche-2",
+  "MATIC":  "matic-network",
+  "UNI":    "uniswap",
+  "AAVE":   "aave",
+  "CRV":    "curve-dao-token",
+  "GMX":    "gmx",
+  "PENDLE": "pendle",
+  "LINK":   "chainlink",
+  "LDO":    "lido-dao",
+  // on-chain only — DeFiLlama chain:address key (fetched via VOLATILITY_DEFILLAMA_MAP)
+  "AERO":   "aerodrome-finance",
+  "ANZ":    "base:0xeeC468333ccc16D4BF1cEf497A56cf8C0aAe4Ca3",
 };
 
 // ─── VOLATILITY DEFILLAMA MAP ─────────────────────────────────────────────────
