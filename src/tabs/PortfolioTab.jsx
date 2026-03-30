@@ -4,13 +4,15 @@ import { calcChainConcentration, calcDiversificationScore, calcPortfolioScore, c
 import { Card, SecTitle } from "../components/primitives";
 
 // ─── 11. PORTFOLIO TAB ────────────────────────────────────────────────────────
-export function PortfolioTab({pools, volData}) {
+export function PortfolioTab({pools, volData, walletPools = [], walletLoading = false, onFetchWalletPools, onSuggestRebuild}) {
   const STORAGE_KEY = "portfolio-positions-v2";
   const [positions, setPositions] = useState([]);
   const [showAdd,   setShowAdd]   = useState(false);
   const [saved,     setSaved]     = useState(false);
   const [newPos,    setNewPos]    = useState({symbol:"",protocol:"",chain:"Ethereum",valueUSD:"",entryPrice:"",entryDate:new Date().toISOString().slice(0,10)});
   const [poolSearch,setPoolSearch]= useState("");
+  const [walletAddress, setWalletAddress] = useState("");
+  const [rebuildAdvice, setRebuildAdvice] = useState(null);
 
   useEffect(()=>{
     (async()=>{ try{ const r=await window.storage?.get(STORAGE_KEY); if(r){setPositions(JSON.parse(r.value)||[]);} }catch{/* noop */} })();
@@ -60,6 +62,43 @@ export function PortfolioTab({pools, volData}) {
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:"14px"}}>
+
+      <Card>
+        <SecTitle icon="🧷" sub="Cole seu endereço para buscar posições LP ativas (Uniswap v3)">Carteira on-chain</SecTitle>
+        <div style={{display:"flex",gap:"8px",marginBottom:"10px"}}>
+          <input
+            value={walletAddress}
+            onChange={e=>setWalletAddress(e.target.value.trim())}
+            placeholder="0x..."
+            style={{flex:1,padding:"8px 10px",background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"7px",color:"#f1f5f9",fontFamily:"monospace",fontSize:"11px"}}
+          />
+          <button onClick={()=>onFetchWalletPools?.(walletAddress)} style={{padding:"8px 12px",borderRadius:"7px",fontSize:"10px",background:"rgba(99,102,241,0.15)",border:"1px solid rgba(99,102,241,0.3)",color:"#a5b4fc",cursor:"pointer",fontFamily:"monospace"}}>Buscar pools ativas</button>
+        </div>
+        {walletLoading&&<div style={{fontSize:"10px",color:"#475569"}}>Buscando posições on-chain...</div>}
+        {!walletLoading && walletPools.length>0 && (
+          <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
+            {walletPools.map(wp=>(
+              <div key={wp.id} style={{padding:"8px",borderRadius:"7px",background:"rgba(0,0,0,0.2)",display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:"11px",fontWeight:700,color:"#94a3b8"}}>{wp.symbol} <span style={{fontSize:"9px",color:"#334155"}}>fee {wp.feeTier}</span></div>
+                  <div style={{fontSize:"9px",color:"#334155"}}>TVL ${fmt(wp.tvlUsd,0)} · Match local: {wp.matchedPool?`Score ${wp.matchedPool._score}`:"não encontrado"}</div>
+                </div>
+                <button onClick={()=>setRebuildAdvice(onSuggestRebuild?.(wp.matchedPool||null)||null)} style={{padding:"5px 9px",borderRadius:"6px",fontSize:"9px",background:"rgba(34,197,94,0.12)",border:"1px solid rgba(34,197,94,0.3)",color:"#22c55e",cursor:"pointer"}}>Estratégia remontar</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {!walletLoading && walletAddress && walletPools.length===0 && (
+          <div style={{fontSize:"10px",color:"#475569"}}>Nenhuma posição ativa encontrada para esse endereço (ou endpoint indisponível).</div>
+        )}
+        {rebuildAdvice && (
+          <div style={{marginTop:"10px",padding:"10px",background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.2)",borderRadius:"8px"}}>
+            <div style={{fontSize:"10px",fontWeight:700,color:"#a5b4fc",marginBottom:"3px"}}>{rebuildAdvice.title}</div>
+            <div style={{fontSize:"10px",color:"#94a3b8",lineHeight:1.6}}>{rebuildAdvice.action}</div>
+            <div style={{fontSize:"9px",color:"#64748b",marginTop:"4px"}}>Cadência sugerida: {rebuildAdvice.cadence}</div>
+          </div>
+        )}
+      </Card>
 
       {/* Summary cards */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"10px"}}>

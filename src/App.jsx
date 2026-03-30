@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AAVE_API, BALANCER_API, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, PROTOCOL_COIN_MAP, UNISWAP_ALT, UNISWAP_SUBGRAPH } from "./constants";
-import { buildPoolIntelligence, calcFdvRevenueRatio, calcHistoricalVolatility, calcLiquidityScore, calcScore, detectNarratives, fmt, getAuditEntry, getMarketContext, getProtocolCoinId, getVolLabel, isPairSS, isPairSV, normalizePoolModel } from "./utils";
+import { buildPoolIntelligence, calcFdvRevenueRatio, calcHistoricalVolatility, calcLiquidityScore, calcScore, detectNarratives, fmt, getAuditEntry, getMarketContext, getProtocolCoinId, getVolLabel, isPairSS, isPairSV, normalizePoolModel, suggestRebuildStrategy } from "./utils";
 import { Badge, CalcTab, Card, Chg, LiquidezTab, PlanTab, PoolModal, PoolRow, PortfolioTab, Spin, StatusDot, StrategiesTab, VolatilityTab, AIAdvisorTab } from "./ui";
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
@@ -24,6 +24,8 @@ export default function App() {
   const [pairFilter,   setPairFilter]   = useState("all");
   const [sortBy,       setSortBy]       = useState("score");
   const [search,       setSearch]       = useState("");
+  const [walletPools,  setWalletPools]  = useState([]);
+  const [walletLoading,setWalletLoading]= useState(false);
 
   // ── Fetch prices ──
   const fetchPrices = useCallback(async()=>{
@@ -154,6 +156,58 @@ export default function App() {
       return { ...scored, _normalized: normalizePoolModel(scored), _intelligence: buildPoolIntelligence(scored) };
     }).sort((a,b)=>b._score-a._score);
   },[rawPools,uniswapMap,fdvMap]);
+
+  const fetchWalletActivePools = useCallback(async (walletAddress) => {
+    if (!walletAddress) return [];
+    setWalletLoading(true);
+    const owner = walletAddress.toLowerCase();
+    const query = `{
+      positions(first: 30, where: { owner: "${owner}", liquidity_gt: "0" }) {
+        id
+        liquidity
+        pool {
+          id
+          feeTier
+          token0 { symbol }
+          token1 { symbol }
+          volumeUSD
+          totalValueLockedUSD
+        }
+      }
+    }`;
+    for (const url of [UNISWAP_SUBGRAPH, UNISWAP_ALT]) {
+      try {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query }),
+        });
+        const d = await r.json();
+        const positions = d?.data?.positions || [];
+        if (positions.length) {
+          const mapped = positions.map(pos => {
+            const symbol = `${pos.pool?.token0?.symbol || "?"}/${pos.pool?.token1?.symbol || "?"}`;
+            const localMatch = allPools.find(p => p.symbol?.toUpperCase().replace(/_/g, "/").includes(symbol.toUpperCase()));
+            return {
+              id: pos.id,
+              symbol,
+              feeTier: pos.pool?.feeTier,
+              liquidity: pos.liquidity,
+              tvlUsd: Number(pos.pool?.totalValueLockedUSD || 0),
+              volumeUsd: Number(pos.pool?.volumeUSD || 0),
+              matchedPool: localMatch || null,
+            };
+          });
+          setWalletPools(mapped);
+          setWalletLoading(false);
+          return mapped;
+        }
+      } catch {/* noop */}
+    }
+    setWalletPools([]);
+    setWalletLoading(false);
+    return [];
+  }, [allPools]);
 
   const narratives = detectNarratives(allPools, prices);
   const market     = getMarketContext(prices);
@@ -295,7 +349,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="portfolio"  && <PortfolioTab  pools={allPools} volData={volData}/>}
+        {tab==="portfolio"  && <PortfolioTab pools={allPools} volData={volData} walletPools={walletPools} walletLoading={walletLoading} onFetchWalletPools={fetchWalletActivePools} onSuggestRebuild={(pool)=>suggestRebuildStrategy(pool, volData)}/>}
         {tab==="volatility" && <VolatilityTab volData={volData} volLoading={volLoading} prices={prices}/>}
         {tab==="ai"         && <AIAdvisorTab  pools={allPools} prices={prices} initialPool={advisorPool} key={advisorPool?.pool}/>}
         {tab==="liquidez"   && <LiquidezTab   pools={allPools} fdvData={fdvMap} dataStatus={dataStatus}/>}

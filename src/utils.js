@@ -1,4 +1,4 @@
-import { AUDIT_PROXY, MEDIUM_PROTOCOLS, PROTOCOL_COIN_MAP, SAFE_PROTOCOLS, STABLES } from "./constants";
+import { AUDIT_PROXY, MEDIUM_PROTOCOLS, PROTOCOL_COIN_MAP, SAFE_PROTOCOLS, STABLES, VOLATILITY_COIN_MAP } from "./constants";
 
 export const isStable = s => STABLES.some(x => s?.toUpperCase().includes(x));
 export const isPairSS = sym => { const p = sym?.replace(/_/g, "-").split(/[-/]/) || []; return p.length >= 2 && p.every(x => isStable(x)); };
@@ -206,6 +206,52 @@ export function buildPoolIntelligence(pool) {
     strategy: strategy.type,
     ilRisk,
     fdvRevenueRatio: fdvRevenue,
+  };
+}
+
+export function suggestRebuildStrategy(pool, volData = {}) {
+  if (!pool) {
+    return {
+      title: "Pool não encontrada no ranking atual",
+      action: "Mapeie manualmente o par/protocolo e refaça a posição com menor risco.",
+      cadence: "Revisão imediata",
+    };
+  }
+  const tokens = extractTokens(pool.symbol);
+  const volTokens = tokens.filter(t => !isStable(t) && VOLATILITY_COIN_MAP[t]);
+  const avgVol = volTokens.length
+    ? volTokens
+      .map(t => volData[VOLATILITY_COIN_MAP[t]]?.annualVol)
+      .filter(Boolean)
+      .reduce((a, b) => a + b, 0) / volTokens.length
+    : null;
+  const score = pool._score || 0;
+
+  if (score < 55) {
+    return {
+      title: "Remontagem defensiva",
+      action: "Reduzir exposição e migrar para pool score ≥ 65 (stable/stable ou stable/volátil).",
+      cadence: "Revisão semanal",
+    };
+  }
+  if (avgVol && avgVol > 100) {
+    return {
+      title: "Remontagem por alta volatilidade",
+      action: "Reabrir com range mais amplo e menor capital por posição para evitar sair do range rápido.",
+      cadence: "Revisão a cada 3–7 dias",
+    };
+  }
+  if ((pool.apy || 0) < 12 && (pool._liqScore || 0) < 35) {
+    return {
+      title: "Remontagem por eficiência",
+      action: "Pool com baixa eficiência de fees: considerar migração para pool de maior liquidez/volume.",
+      cadence: "Revisão quinzenal",
+    };
+  }
+  return {
+    title: "Remontagem tática",
+    action: "Manter o par e rebalancear range com aporte parcial para reduzir custo médio.",
+    cadence: "Revisão a cada 2–4 semanas",
   };
 }
 
