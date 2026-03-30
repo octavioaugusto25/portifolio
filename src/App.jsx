@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AAVE_API, BALANCER_API, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, PROTOCOL_COIN_MAP, UNISWAP_ALT, UNISWAP_SUBGRAPH } from "./constants";
+import { AAVE_API, BALANCER_API, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, ETH_RPC, PROTOCOL_COIN_MAP, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_ALT, UNISWAP_SUBGRAPH, UNISWAP_V3_NPM } from "./constants";
 import { buildPoolIntelligence, calcFdvRevenueRatio, calcHistoricalVolatility, calcLiquidityScore, calcScore, detectNarratives, fmt, getAuditEntry, getMarketContext, getProtocolCoinId, getVolLabel, isPairSS, isPairSV, normalizePoolModel, suggestRebuildStrategy } from "./utils";
 import { Badge, CalcTab, Card, Chg, LiquidezTab, PlanTab, PoolModal, PoolRow, PortfolioTab, Spin, StatusDot, StrategiesTab, VolatilityTab, AIAdvisorTab } from "./ui";
 
@@ -141,7 +141,7 @@ export default function App() {
   },[rawPools,fdvMap]);
 
   const fetchWalletActivePools = useCallback(async (walletAddress) => {
-    if (!walletAddress) return [];
+    if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) return [];
     setWalletLoading(true);
     const owner = walletAddress.toLowerCase();
     const query = `{
@@ -187,6 +187,43 @@ export default function App() {
         }
       } catch {/* noop */}
     }
+    // Fallback on-chain via Uniswap V3 Position Manager (Ethereum mainnet)
+    const pad64 = (h) => h.replace(/^0x/, "").padStart(64, "0");
+    const addrArg = pad64(walletAddress.toLowerCase().replace(/^0x/, ""));
+    const rpcCall = async (to, data) => {
+      const payload = { jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] };
+      const r = await fetchExternal(ETH_RPC, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const d = await r.json();
+      return d?.result || "0x";
+    };
+    try {
+      const balHex = await rpcCall(UNISWAP_V3_NPM, `0x70a08231${addrArg}`);
+      const bal = Number(BigInt(balHex || "0x0"));
+      const lim = Math.min(8, bal);
+      const fallback = [];
+      for (let i = 0; i < lim; i++) {
+        const idx = pad64(`0x${i.toString(16)}`);
+        const tokenHex = await rpcCall(UNISWAP_V3_NPM, `0x2f745c59${addrArg}${idx}`);
+        const tokenId = BigInt(tokenHex || "0x0");
+        const tokenIdArg = pad64(`0x${tokenId.toString(16)}`);
+        const pos = await rpcCall(UNISWAP_V3_NPM, `0x99fbab88${tokenIdArg}`);
+        if (!pos || pos === "0x") continue;
+        const chunks = pos.replace(/^0x/, "").match(/.{1,64}/g) || [];
+        const token0 = `0x${chunks[2]?.slice(24) || ""}`.toLowerCase();
+        const token1 = `0x${chunks[3]?.slice(24) || ""}`.toLowerCase();
+        const fee = Number(BigInt(`0x${chunks[4] || "0"}`));
+        const liquidity = BigInt(`0x${chunks[7] || "0"}`);
+        if (liquidity === 0n) continue;
+        const s0 = TOKEN_SYMBOL_BY_ADDRESS[token0] || `${token0.slice(0, 6)}…`;
+        const s1 = TOKEN_SYMBOL_BY_ADDRESS[token1] || `${token1.slice(0, 6)}…`;
+        const symbol = `${s0}/${s1}`;
+        const localMatch = allPools.find(p => p.symbol?.toUpperCase().replace(/_/g, "/").includes(symbol.toUpperCase()));
+        fallback.push({ id: tokenId.toString(), symbol, feeTier: fee, liquidity: liquidity.toString(), tvlUsd: 0, volumeUsd: 0, matchedPool: localMatch || null });
+      }
+      setWalletPools(fallback);
+      setWalletLoading(false);
+      return fallback;
+    } catch {/* noop */}
     setWalletPools([]);
     setWalletLoading(false);
     return [];

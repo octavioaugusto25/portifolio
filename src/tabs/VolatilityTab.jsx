@@ -179,6 +179,7 @@ export function VolatilityTab({volData, volLoading, prices}) {
               <strong style={{color:"#f59e0b",fontSize:"14px"}}>{Math.abs(ilLoss).toFixed(1)}%/ano</strong>
             </div>
             <div style={{padding:"10px",background:"rgba(0,0,0,0.15)",borderRadius:"7px",fontSize:"9px",color:"#334155",lineHeight:1.6}}>
+              Fórmula usada: <span style={{fontFamily:"monospace",color:"#94a3b8"}}>IL = 2√r/(1+r) - 1</span>, onde <span style={{fontFamily:"monospace"}}>r</span> é o multiplicador de preço.<br/>
               IL permanece latente enquanto você está no pool. Só se materializa ao retirar. Stable/stable pools têm IL≈0.
             </div>
           </div>
