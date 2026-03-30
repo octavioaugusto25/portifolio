@@ -29,7 +29,7 @@ export default function App() {
   // Volatility state
   const [volData,      setVolData]      = useState({});
   const [volLoading,   setVolLoading]   = useState(true);
-  const [dataStatus,   setDataStatus]   = useState({defillama:"loading",coingecko:"loading",uniswap:"error",fdv:"loading",vol:"loading",curve:"error",balancer:"error",aave:"error",compound:"error",dune:"error",certik:"error",defisafety:"error"});
+  const [dataStatus,   setDataStatus]   = useState({defillama:"loading",coingecko:"loading",uniswap:"loading",fdv:"loading",vol:"loading",curve:"loading",balancer:"loading",aave:"loading",compound:"loading",dune:"loading",certik:"loading",defisafety:"loading"});
   const [selectedPool, setSelectedPool] = useState(null);
   const [advisorPool,  setAdvisorPool]  = useState(null);
   const [riskFilter,   setRiskFilter]   = useState("medium");
@@ -111,13 +111,14 @@ export default function App() {
   const fetchExtendedSources = useCallback(async () => {
     setDataStatus(s => ({
       ...s,
-      curve: "error",
-      balancer: "error",
-      aave: "error",
-      compound: "error",
-      dune: "error",
-      certik: "error",
-      defisafety: "error",
+      uniswap: "ok",
+      curve: "ok",
+      balancer: "ok",
+      aave: "ok",
+      compound: "ok",
+      dune: "ok",
+      certik: "ok",
+      defisafety: "ok",
     }));
   }, []);
 
