@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AAVE_API, BALANCER_API, BASE_RPC, BASE_RPC_ALT, BASE_UNISWAP_V3_NPM, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, ETH_RPC, PROTOCOL_COIN_MAP, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_V3_NPM } from "./constants";
+import { AAVE_API, BALANCER_API, BASE_RPC, BASE_RPC_ALT, BASE_UNISWAP_V3_NPM, BASE_UNISWAP_V4_POSITIONS_NFT, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, ETH_RPC, PROTOCOL_COIN_MAP, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_V3_NPM } from "./constants";
 import { buildPoolIntelligence, calcFdvRevenueRatio, calcHistoricalVolatility, calcLiquidityScore, calcScore, detectNarratives, fmt, getAuditEntry, getMarketContext, getProtocolCoinId, getVolLabel, isPairSS, isPairSV, normalizePoolModel, suggestRebuildStrategy } from "./utils";
 import { Badge, CalcTab, Card, Chg, LiquidezTab, PlanTab, PoolModal, PoolRow, PortfolioTab, Spin, StatusDot, StrategiesTab, VolatilityTab, AIAdvisorTab } from "./ui";
 
@@ -210,6 +210,83 @@ export default function App() {
     return [];
   }, [allPools, fetchExternal]);
 
+  const fetchWalletPoolFromBaseTx = useCallback(async (txHash) => {
+    if (!txHash || !/^0x([A-Fa-f0-9]{64})$/.test(txHash)) return [];
+    setWalletLoading(true);
+    const rpcCall = async (rpcUrl, method, params) => {
+      const payload = { jsonrpc: "2.0", id: 1, method, params };
+      const r = await fetchExternal(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (!r.ok) throw new Error(`RPC ${method} failed`);
+      const d = await r.json();
+      return d?.result;
+    };
+    const rpcCallWithFallback = async (method, params) => {
+      for (const rpcUrl of [BASE_RPC, BASE_RPC_ALT]) {
+        try {
+          const result = await rpcCall(rpcUrl, method, params);
+          if (result) return result;
+        } catch {/* noop */}
+      }
+      return null;
+    };
+    try {
+      const [tx, receipt] = await Promise.all([
+        rpcCallWithFallback("eth_getTransactionByHash", [txHash]),
+        rpcCallWithFallback("eth_getTransactionReceipt", [txHash]),
+      ]);
+      if (!tx || !receipt || receipt.status !== "0x1") {
+        setWalletPools([]);
+        setWalletLoading(false);
+        return [];
+      }
+      const transferSig = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+      const zeroTopic = `0x${"0".repeat(64)}`;
+      const mintedLog = (receipt.logs || []).find(log =>
+        log?.address?.toLowerCase() === BASE_UNISWAP_V4_POSITIONS_NFT.toLowerCase() &&
+        log?.topics?.[0] === transferSig &&
+        log?.topics?.[1] === zeroTopic
+      );
+      const tokenId = mintedLog?.topics?.[3] ? BigInt(mintedLog.topics[3]).toString() : null;
+      const transferredTokens = [...new Set((receipt.logs || [])
+        .filter(log => log?.topics?.[0] === transferSig && TOKEN_SYMBOL_BY_ADDRESS[log.address?.toLowerCase()])
+        .map(log => log.address.toLowerCase()))];
+      const tokenSymbols = transferredTokens.map(address => TOKEN_SYMBOL_BY_ADDRESS[address]).filter(Boolean);
+      if (tx.value && tx.value !== "0x0") tokenSymbols.unshift("ETH");
+      const uniqueSymbols = [...new Set(tokenSymbols)].slice(0, 2);
+      const symbol = uniqueSymbols.length >= 2 ? `${uniqueSymbols[0]}/${uniqueSymbols[1]}` : uniqueSymbols[0] || "Unknown";
+      const feeCandidates = (tx.input?.replace(/^0x/, "").match(/.{1,64}/g) || [])
+        .map(chunk => Number(BigInt(`0x${chunk}`)))
+        .filter(value => [100, 500, 3000, 10000].includes(value));
+      const feeTier = feeCandidates[0] || 3000;
+      const localMatch = allPools.find(p => {
+        const poolSymbol = p.symbol?.toUpperCase().replace(/_/g, "/") || "";
+        return poolSymbol.includes(symbol.toUpperCase()) || symbol.toUpperCase().includes(poolSymbol);
+      }) || null;
+      const parsed = [{
+        id: tokenId ? `base-v4-${tokenId}` : txHash,
+        symbol,
+        feeTier,
+        liquidity: null,
+        tvlUsd: 0,
+        volumeUsd: 0,
+        chain: "Base",
+        protocol: "Uniswap v4",
+        source: `Base tx ${txHash.slice(0, 10)}...`,
+        tokenId,
+        txHash,
+        nftContract: BASE_UNISWAP_V4_POSITIONS_NFT,
+        matchedPool: localMatch,
+      }];
+      setWalletPools(parsed);
+      setWalletLoading(false);
+      return parsed;
+    } catch {
+      setWalletPools([]);
+      setWalletLoading(false);
+      return [];
+    }
+  }, [allPools, fetchExternal]);
+
   const narratives = detectNarratives(allPools, prices);
   const market     = getMarketContext(prices);
 
@@ -350,7 +427,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="portfolio"  && <PortfolioTab pools={allPools} volData={volData} walletPools={walletPools} walletLoading={walletLoading} onFetchWalletPools={fetchWalletActivePools} onSuggestRebuild={(pool)=>suggestRebuildStrategy(pool, volData)}/>}
+        {tab==="portfolio"  && <PortfolioTab pools={allPools} volData={volData} walletPools={walletPools} walletLoading={walletLoading} onFetchWalletPools={fetchWalletActivePools} onFetchWalletPoolTx={fetchWalletPoolFromBaseTx} onSuggestRebuild={(pool)=>suggestRebuildStrategy(pool, volData)}/>}
         {tab==="volatility" && <VolatilityTab volData={volData} volLoading={volLoading} prices={prices}/>}
         {tab==="ai"         && <AIAdvisorTab  pools={allPools} prices={prices} initialPool={advisorPool} key={advisorPool?.pool}/>}
         {tab==="liquidez"   && <LiquidezTab   pools={allPools} fdvData={fdvMap} dataStatus={dataStatus}/>}

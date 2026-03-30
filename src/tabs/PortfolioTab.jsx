@@ -5,7 +5,7 @@ import { Card, SecTitle } from "../components/primitives";
 import { readPersisted, writePersisted } from "../persist";
 
 // ─── 11. PORTFOLIO TAB ────────────────────────────────────────────────────────
-export function PortfolioTab({pools, volData, walletPools = [], walletLoading = false, onFetchWalletPools, onSuggestRebuild}) {
+export function PortfolioTab({pools, volData, walletPools = [], walletLoading = false, onFetchWalletPools, onFetchWalletPoolTx, onSuggestRebuild}) {
   const STORAGE_KEY = "portfolio-positions-v2";
   const [positions, setPositions] = useState([]);
   const [showAdd,   setShowAdd]   = useState(false);
@@ -13,6 +13,7 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
   const [newPos,    setNewPos]    = useState({symbol:"",protocol:"",chain:"Ethereum",valueUSD:"",entryPrice:"",entryDate:new Date().toISOString().slice(0,10)});
   const [poolSearch,setPoolSearch]= useState("");
   const [walletAddress, setWalletAddress] = useState("");
+  const [txHash, setTxHash] = useState("0x4353b87721b13688efde117ccbdbe5b2dbcf42bcd369af4bff1a511b35275711");
   const [rebuildAdvice, setRebuildAdvice] = useState(null);
 
   useEffect(()=>{
@@ -69,7 +70,7 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:"14px"}}>
       <Card>
-        <SecTitle icon="🧷" sub="Cole seu endereço para buscar posições LP ativas na Base/Ethereum (sem DeBank)">Carteira on-chain</SecTitle>
+        <SecTitle icon="🧷" sub="Busque por carteira ou pela tx da Base da sua posição Uniswap v4">Carteira on-chain</SecTitle>
         <div style={{display:"flex",gap:"8px",marginBottom:"10px"}}>
           <input
             value={walletAddress}
@@ -79,6 +80,15 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
           />
           <button disabled={walletLoading} onClick={()=>onFetchWalletPools?.(walletAddress)} style={{padding:"8px 12px",borderRadius:"7px",fontSize:"10px",background:"rgba(99,102,241,0.15)",border:"1px solid rgba(99,102,241,0.3)",color:"#a5b4fc",cursor:walletLoading?"not-allowed":"pointer",opacity:walletLoading?0.6:1,fontFamily:"monospace"}}>Buscar pools ativas</button>
         </div>
+        <div style={{display:"flex",gap:"8px",marginBottom:"10px"}}>
+          <input
+            value={txHash}
+            onChange={e=>setTxHash(e.target.value.trim())}
+            placeholder="0x... tx da Base"
+            style={{flex:1,padding:"8px 10px",background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"7px",color:"#f1f5f9",fontFamily:"monospace",fontSize:"11px"}}
+          />
+          <button disabled={walletLoading} onClick={()=>onFetchWalletPoolTx?.(txHash)} style={{padding:"8px 12px",borderRadius:"7px",fontSize:"10px",background:"rgba(34,197,94,0.12)",border:"1px solid rgba(34,197,94,0.3)",color:"#86efac",cursor:walletLoading?"not-allowed":"pointer",opacity:walletLoading?0.6:1,fontFamily:"monospace"}}>Buscar pela tx</button>
+        </div>
         {walletLoading&&<div style={{fontSize:"10px",color:"#475569"}}>Buscando posições on-chain...</div>}
         {!walletLoading && walletPools.length>0 && (
           <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
@@ -87,14 +97,15 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
                 <div>
                   <div style={{fontSize:"11px",fontWeight:700,color:"#94a3b8"}}>{wp.symbol} <span style={{fontSize:"9px",color:"#334155"}}>fee {wp.feeTier}</span></div>
                   <div style={{fontSize:"9px",color:"#334155"}}>Origem: {wp.source || "wallet"} · TVL ${fmt(wp.tvlUsd,0)} · Match local: {wp.matchedPool?`Score ${wp.matchedPool._score}`:"não encontrado"}</div>
+                  {wp.tokenId && <div style={{fontSize:"9px",color:"#475569"}}>NFT #{wp.tokenId} · {wp.protocol || "LP position"}</div>}
                 </div>
                 <button onClick={()=>setRebuildAdvice(onSuggestRebuild?.(wp.matchedPool||null)||null)} style={{padding:"5px 9px",borderRadius:"6px",fontSize:"9px",background:"rgba(34,197,94,0.12)",border:"1px solid rgba(34,197,94,0.3)",color:"#22c55e",cursor:"pointer"}}>Estratégia remontar</button>
               </div>
             ))}
           </div>
         )}
-        {!walletLoading && walletAddress && walletPools.length===0 && (
-          <div style={{fontSize:"10px",color:"#475569"}}>Nenhuma posição ativa encontrada para esse endereço (ou endpoint indisponível).</div>
+        {!walletLoading && (walletAddress || txHash) && walletPools.length===0 && (
+          <div style={{fontSize:"10px",color:"#475569"}}>Nenhuma posição encontrada com essa carteira/tx.</div>
         )}
         {rebuildAdvice && (
           <div style={{marginTop:"10px",padding:"10px",background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.2)",borderRadius:"8px"}}>

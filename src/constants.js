@@ -16,6 +16,7 @@ export const BASE_RPC_ALT = "https://mainnet.base.org";
 export const DEBANK_PRO_API = "https://pro-openapi.debank.com/v1";
 export const UNISWAP_V3_NPM = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88";
 export const BASE_UNISWAP_V3_NPM = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
+export const BASE_UNISWAP_V4_POSITIONS_NFT = "0x7c5f5a4bbd8fd63184577525326123b519429bdc";
 export const TOKEN_SYMBOL_BY_ADDRESS = {
   "0x4200000000000000000000000000000000000006": "WETH",
   "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": "WETH",
