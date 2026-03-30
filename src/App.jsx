@@ -220,7 +220,7 @@ export default function App() {
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}.fade{animation:fadeIn .24s ease both}`}</style>
 
       {/* Header */}
-      <div style={{background:"linear-gradient(90deg,#08152b,#0b1e38)",borderBottom:"1px solid rgba(99,102,241,0.13)",padding:"0 22px",height:"50px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50}}>
+      <div style={{background:"linear-gradient(90deg,#08152b,#0b1e38)",borderBottom:"1px solid rgba(99,102,241,0.13)",padding:"0 clamp(12px,2vw,28px)",height:"54px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50}}>
         <div style={{display:"flex",alignItems:"center",gap:"9px"}}>
           <div style={{width:"7px",height:"7px",borderRadius:"50%",background:"#6366f1",boxShadow:"0 0 10px #6366f1",animation:"pulse 2.5s ease infinite"}}/>
           <span style={{fontSize:"10px",fontWeight:700,color:"#6875d4",letterSpacing:"3px",fontFamily:"monospace"}}>DEFI RISK INTELLIGENCE</span>
@@ -237,8 +237,8 @@ export default function App() {
       </div>
 
       {/* Ticker */}
-      <div style={{background:"#070e1a",borderBottom:"1px solid rgba(255,255,255,0.03)",padding:"12px 22px"}}>
-        <div style={{maxWidth:"1180px",margin:"0 auto",display:"flex",gap:"10px",flexWrap:"wrap"}}>
+      <div style={{background:"#070e1a",borderBottom:"1px solid rgba(255,255,255,0.03)",padding:"12px clamp(12px,2vw,28px)"}}>
+        <div style={{maxWidth:"100%",margin:"0 auto",display:"flex",gap:"10px",flexWrap:"wrap"}}>
           {[{sym:"BTC",emoji:"₿",color:"#f59e0b",k:"bitcoin",coinId:"bitcoin"},{sym:"ETH",emoji:"Ξ",color:"#6366f1",k:"ethereum",coinId:"ethereum"},{sym:"SOL",emoji:"◎",color:"#a78bfa",k:"solana",coinId:"solana"}].map(c=>{
             const vd=volData[c.coinId];
             const vl=getVolLabel(vd?.annualVol);
@@ -268,8 +268,8 @@ export default function App() {
       </div>
 
       {/* Tabs */}
-      <div style={{borderBottom:"1px solid rgba(255,255,255,0.04)",padding:"0 22px",background:"#070d18",overflowX:"auto"}}>
-        <div style={{maxWidth:"1180px",margin:"0 auto",display:"flex",gap:"1px",minWidth:"max-content"}}>
+      <div style={{borderBottom:"1px solid rgba(255,255,255,0.04)",padding:"0 clamp(12px,2vw,28px)",background:"#070d18",overflowX:"auto"}}>
+        <div style={{maxWidth:"100%",margin:"0 auto",display:"flex",gap:"1px",minWidth:"max-content"}}>
           {tabs.map(t=>(
             <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"10px 12px",border:"none",background:tab===t.id?"rgba(99,102,241,0.07)":"transparent",color:tab===t.id?"#8b97e8":"#2d3748",fontSize:"10px",cursor:"pointer",borderBottom:`2px solid ${tab===t.id?"#6366f1":"transparent"}`,transition:"all 0.2s",fontFamily:"Inter, Segoe UI, Roboto, sans-serif",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:"4px"}}>
               {t.label}
@@ -279,7 +279,7 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{maxWidth:"1180px",margin:"0 auto",padding:"18px 22px"}} className="fade" key={tab}>
+      <div style={{maxWidth:"100%",margin:"0 auto",padding:"18px clamp(12px,2vw,28px)"}} className="fade" key={tab}>
 
         {/* POOLS */}
         {tab==="pools"&&(
