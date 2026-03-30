@@ -1,72 +1,88 @@
 /**
- * analysisEngine.js
+ * analysisEngine.js — DeFi Risk Intelligence
  * ─────────────────────────────────────────────────────────────────────────────
- * Pure financial logic for the DeFi Risk Intelligence app.
- * No React, no UI, no side effects — only functions that take numbers, return numbers.
+ * Senior DeFi quant-grade financial logic.
+ * Pure functions: no React, no UI, no side effects.
  *
- * Every public function documents:
- *   - what inputs are required
- *   - what it returns when inputs are missing / invalid
- *   - the formula used
- *
- * Rules enforced throughout:
- *   1. NEVER invent data. If input is invalid → return null.
- *   2. NEVER mix token-denominated and USD-denominated values.
- *   3. ALL percentages are plain numbers (e.g. 5.72 means 5.72 %, NOT 0.0572).
- *   4. ALL fractions are 0–1 (e.g. positionShare = 0.000004, NOT 0.0004%).
+ * CONTRACTS:
+ *   1. NEVER invent data. Missing input → return null, not 0 or an estimate.
+ *   2. NEVER mix LP-context price with spot wallet avgCost.
+ *   3. ALL percentages are plain numbers: 5.72 means 5.72%, NOT 0.0572.
+ *   4. ALL fractions are 0–1: positionShare = 0.000004.
+ *   5. Fee calculation ONLY uses volume × feeTier. APY fallback is LABELLED.
+ *   6. IL MUST drive the decision engine — not just decorate the UI.
+ *   7. Net daily result (fees minus IL drift) is the primary economic output.
  */
 
-// ─── PRIMITIVES ───────────────────────────────────────────────────────────────
+// ─── GUARDS ──────────────────────────────────────────────────────────────────
 
-/** True when v is a finite, positive number usable as a price. */
-export const isValidPrice = (v) => typeof v === "number" && isFinite(v) && v > 0;
-
-/** True when v is a finite, non-negative number. */
-export const isValidAmount = (v) => typeof v === "number" && isFinite(v) && v >= 0;
-
-/** True when v is a finite, strictly positive number (volumes, TVL). */
+/** Finite number, strictly positive — safe as a price or amount. */
+export const isValidPrice    = (v) => typeof v === "number" && isFinite(v) && v > 0;
+/** Finite number, ≥ 0 — safe as a balance or quantity. */
+export const isValidAmount   = (v) => typeof v === "number" && isFinite(v) && v >= 0;
+/** Finite number, strictly positive — safe as TVL, volume, etc. */
 export const isValidPositive = (v) => typeof v === "number" && isFinite(v) && v > 0;
 
 // ─── ENTRY PRICE RESOLUTION ──────────────────────────────────────────────────
 
 /**
- * Resolve the single source-of-truth entry price for a position.
+ * LP context and spot context use DIFFERENT price concepts.
  *
- * Priority order (first valid wins):
- *   1. avgCostUSD (user-entered cost per token — most intentional)
- *   2. entryPrice (legacy field / imported from tx)
- *   3. null (no entry price known)
+ * LP context (PoolAnalysisPanel):
+ *   → entryPrice = price of the volatile asset AT THE MOMENT OF LIQUIDITY PROVISION.
+ *     Used to compute IL = how much LP diverged vs simply holding.
  *
- * NEVER fall back to current market price — that would always show 0% IL.
+ * Spot context (wallet spot position):
+ *   → avgCostUSD = cost basis per token for P&L tracking.
+ *     ONLY meaningful for single-asset hold positions, NOT for LP pairs.
  *
- * @param {object} pos - position object from portfolio state
- * @returns {number|null}
+ * Priority for LP analysis (resolveEntryPrice):
+ *   1. avgCostUSD  — user entered explicit cost (most intentional)
+ *   2. entryPrice  — imported from tx / legacy field
+ *   3. null        — we do NOT fall back to current price (would show 0% IL always)
+ *
+ * NEVER use current market price as a proxy for entry price.
  */
 export function resolveEntryPrice(pos) {
   if (!pos) return null;
-  const avg  = Number(pos.avgCostUSD);
+  // avgCostUSD wins if valid
+  const avg = Number(pos.avgCostUSD);
+  if (isValidPrice(avg)) return avg;
+  // legacy entryPrice field
   const entr = Number(pos.entryPrice);
-  if (isValidPrice(avg))  return avg;
   if (isValidPrice(entr)) return entr;
   return null;
+}
+
+/**
+ * Detect whether a position is an LP position or a spot hold.
+ * LP positions have a "/" in their symbol and a feeTier.
+ */
+export function detectPositionType(pos) {
+  const sym = (pos?.symbol || "").toUpperCase();
+  const hasSlash = sym.includes("/");
+  const hasFeeTier = isValidPositive(Number(pos?.feeTier));
+  if (hasSlash || hasFeeTier) return "lp";
+  return "spot";
 }
 
 // ─── IMPERMANENT LOSS ─────────────────────────────────────────────────────────
 
 /**
- * Calculate Impermanent Loss percentage.
+ * Compute Impermanent Loss for a FULL-RANGE (v2-style) LP position.
  *
- * Formula: IL = (2√r / (1+r) − 1) × 100
- * where r = currentPrice / entryPrice
+ * Formula: IL = (2√r / (1+r) − 1) × 100   where r = currentPrice / entryPrice
  *
- * Properties:
- *   - IL is always ≤ 0 (it is a loss relative to hold)
- *   - IL = 0 when r = 1 (price unchanged)
- *   - IL approaches −100% as r → 0 or r → ∞
- *   - Practical range for r ∈ [0.5, 2]: IL ∈ [−5.72%, 0%]
+ * Notes:
+ *   - IL is always ≤ 0 relative to holding both assets.
+ *   - At r = 1 (no price change): IL = 0.
+ *   - At r = 2 (+100%): IL ≈ −5.72%.
+ *   - At r = 0.5 (−50%): IL ≈ −5.72% (symmetric).
+ *   - Concentrated LP (v3) has higher IL per unit of range — this formula gives
+ *     a LOWER BOUND; real v3 IL can be much worse when out of range.
  *
- * @param {number|null} currentPrice  - current market price in USD
- * @param {number|null} entryPrice    - entry price in USD (same token denomination)
+ * @param {number|null} currentPrice  - current market price (USD)
+ * @param {number|null} entryPrice    - price at LP provision (USD, same token)
  * @returns {{ ratio: number, il: number, ilAbs: number } | null}
  */
 export function computeIL(currentPrice, entryPrice) {
@@ -74,9 +90,7 @@ export function computeIL(currentPrice, entryPrice) {
 
   const r   = currentPrice / entryPrice;
   const raw = (2 * Math.sqrt(r) / (1 + r) - 1) * 100;
-
-  // Clamp: IL cannot exceed 100% loss mathematically,
-  // and floating point can produce tiny positive values at r≈1.
+  // Clamp: IL is mathematically in (−100%, 0]; floating point can give tiny positives at r≈1
   const il    = Math.max(-100, Math.min(0, raw));
   const ilAbs = Math.abs(il);
 
@@ -84,8 +98,8 @@ export function computeIL(currentPrice, entryPrice) {
 }
 
 /**
- * Classify IL severity for display.
- * @param {number} ilAbs - absolute IL percentage (0–100)
+ * Classify IL severity.
+ * These thresholds represent annual fee APY ranges typical for DeFi pools.
  */
 export function ilSeverity(ilAbs) {
   if (ilAbs < 0.5)  return { label: "Negligível", tier: "negligible", color: "#22c55e" };
@@ -95,20 +109,47 @@ export function ilSeverity(ilAbs) {
   return              { label: "Crítico",     tier: "critical",   color: "#ef4444" };
 }
 
+/**
+ * Estimate the DAILY IL drift in USD.
+ *
+ * This approximates how much value is being lost per day purely from price movement,
+ * compared to what the position would be worth if simply held as 50/50.
+ *
+ * Approximation: dailyILDrift ≈ positionValueUSD × (annualVol² / 8) / 365
+ *
+ * Derivation: For small price moves, IL ≈ −(Δp/p)² / 8.
+ * Daily variance ≈ (annualVol/√365)², so expected daily IL drift ≈ vol²/(8×365).
+ * This is a lower bound — v3 concentrated positions lose more when out of range.
+ *
+ * Only valid when:
+ *   - positionValueUSD > 0
+ *   - annualVol is known
+ *   - position is in range (out-of-range LP has 0 new IL but is fully converted to one asset)
+ *
+ * @param {number|null} positionValueUSD
+ * @param {number|null} annualVolPct  - e.g. 60 means 60%/year
+ * @param {boolean}     inRange
+ * @returns {number|null} - USD per day (positive = cost)
+ */
+export function estimateDailyILDrift(positionValueUSD, annualVolPct, inRange) {
+  if (!isValidPositive(positionValueUSD) || !isValidPositive(annualVolPct)) return null;
+  if (!inRange) return null; // out-of-range: no NEW IL, but position is fully converted
+  const vol   = annualVolPct / 100;
+  const daily = positionValueUSD * (vol * vol) / (8 * 365);
+  return daily;
+}
+
 // ─── RANGE ANALYSIS ──────────────────────────────────────────────────────────
 
 /**
- * Determine the effective price range to use.
+ * Resolve the effective price range to use.
  *
  * Priority:
- *   1. User-defined range (rangeMin / rangeMax) — if both are valid and min < max
- *   2. Suggested range from volatility (suggestedRange) — if available
- *   3. null (no range available)
+ *   1. User-defined (rangeMin / rangeMax) — if both valid and min < max
+ *   2. Suggested range from volatility analysis — if available
+ *   3. null — no range data
  *
- * @param {number|null} userMin
- * @param {number|null} userMax
- * @param {{ lower: number, upper: number }|null} suggestedRange
- * @returns {{ min: number, max: number, source: 'user'|'suggested' } | null}
+ * Source is tracked so the UI can label it clearly.
  */
 export function resolveRange(userMin, userMax, suggestedRange) {
   const uMin = Number(userMin);
@@ -116,194 +157,312 @@ export function resolveRange(userMin, userMax, suggestedRange) {
   if (isValidPrice(uMin) && isValidPrice(uMax) && uMin < uMax) {
     return { min: uMin, max: uMax, source: "user" };
   }
-  if (suggestedRange && isValidPrice(suggestedRange.lower) && isValidPrice(suggestedRange.upper)) {
+  if (
+    suggestedRange &&
+    isValidPrice(suggestedRange.lower) &&
+    isValidPrice(suggestedRange.upper)
+  ) {
     return { min: suggestedRange.lower, max: suggestedRange.upper, source: "suggested" };
   }
   return null;
 }
 
 /**
- * Compute range status given a resolved range and current price.
+ * Compute range status.
  *
- * @param {number|null} currentPrice
- * @param {{ min: number, max: number, source: string }|null} range
  * @returns {{
- *   inRange: boolean,
- *   distancePct: number,     // 0 if inRange; % distance to nearest boundary otherwise
- *   nearestBoundary: 'min'|'max'|null,
- *   source: 'user'|'suggested'|null
+ *   inRange:          boolean,
+ *   distancePct:      number,              // 0 if inRange; % to nearest boundary otherwise
+ *   nearestBoundary:  'min'|'max'|null,
+ *   source:           'user'|'suggested',
+ *   centerPrice:      number,              // midpoint of range
+ *   rangeWidthPct:    number,              // (max−min)/min × 100
  * } | null}
  */
 export function computeRangeStatus(currentPrice, range) {
   if (!isValidPrice(currentPrice) || !range) return null;
 
   const { min, max, source } = range;
-  const inRange = currentPrice >= min && currentPrice <= max;
+  const inRange         = currentPrice >= min && currentPrice <= max;
+  const centerPrice     = (min + max) / 2;
+  const rangeWidthPct   = ((max - min) / min) * 100;
 
-  let distancePct = 0;
-  let nearestBoundary = null;
+  let distancePct      = 0;
+  let nearestBoundary  = null;
 
   if (!inRange) {
     if (currentPrice < min) {
-      distancePct = ((min - currentPrice) / currentPrice) * 100;
+      distancePct     = ((min - currentPrice) / currentPrice) * 100;
       nearestBoundary = "min";
     } else {
-      distancePct = ((currentPrice - max) / currentPrice) * 100;
+      distancePct     = ((currentPrice - max) / currentPrice) * 100;
       nearestBoundary = "max";
     }
   }
 
-  return { inRange, distancePct, nearestBoundary, source };
+  return { inRange, distancePct, nearestBoundary, source, centerPrice, rangeWidthPct };
 }
 
-// ─── FEE ANALYSIS ────────────────────────────────────────────────────────────
+// ─── FEE CALCULATION ─────────────────────────────────────────────────────────
 
 /**
- * Compute fee metrics for a liquidity pool.
+ * Compute fee metrics. STRICT rules:
  *
- * Primary formula (when volume is available):
- *   dailyPoolFees = volume24h × feeTier_fraction
+ * PRIMARY (volume-based, the ONLY accurate method):
+ *   dailyPoolFees = volume24h × (feeTierBps / 1,000,000)
  *   feeAPR        = (dailyPoolFees × 365 / tvl) × 100
- *   userDailyFees = dailyPoolFees × positionShare
+ *   userDailyFees = dailyPoolFees × (positionValueUSD / tvl)
  *
- * Fallback formula (when volume is missing but TVL and APY are available):
- *   Estimate daily fees from reported APY:
+ * FALLBACK (APY-based) — ONLY when volume is missing AND explicitly flagged:
+ *   ⚠ APY includes token emission rewards, not just trading fees.
+ *   ⚠ This ALWAYS OVERESTIMATES pure fee income.
+ *   ⚠ Never use this for HOLD/EXIT decisions.
  *   dailyPoolFees ≈ tvl × (apy / 100) / 365
- *   NOTE: this includes token rewards, so it overestimates pure fee revenue.
- *   Always label as "APY fallback" and warn user.
  *
- * @param {object} params
- * @param {number|null} params.volume24h        - real 24-h pool volume in USD
- * @param {number|null} params.tvl              - pool total value locked in USD
- * @param {number|null} params.feeTierBps       - fee tier in basis-points (e.g. 3000 = 0.3%)
- * @param {number|null} params.positionValueUSD - user position size in USD
- * @param {number|null} params.apy              - pool reported APY % (for fallback only)
- * @returns {{
- *   dailyPoolFees:   number|null,
- *   feeAPR:          number|null,
- *   userDailyFees:   number|null,
- *   userMonthlyFees: number|null,
- *   positionShare:   number|null,   // fraction 0–1
- *   volTvlRatio:     number|null,   // % (informational)
- *   dataSource:      'volume'|'apy_fallback'|'unavailable',
- *   warning:         string|null,
- * }}
+ * If neither volume nor APY+TVL are available → return unavailable.
+ * NEVER fake data. NEVER show invented precision.
+ *
+ * @param {{
+ *   volume24h:        number|null,
+ *   tvl:              number|null,
+ *   feeTierBps:       number|null,  // e.g. 500=0.05%, 3000=0.3%, 10000=1%
+ *   positionValueUSD: number|null,
+ *   apy:              number|null,
+ * }} params
  */
 export function computeFees({ volume24h, tvl, feeTierBps, positionValueUSD, apy }) {
   const hasTvl      = isValidPositive(tvl);
   const hasVolume   = isValidPositive(volume24h);
   const hasPosition = isValidPositive(positionValueUSD);
-  const feeFraction = isValidPositive(feeTierBps) ? feeTierBps / 1_000_000 : null;
 
-  // Position share — calculated regardless of fee source
+  // feeTierBps: validate it's a real fee tier (100–10000 bps = 0.01%–1%)
+  const feeFraction = (isValidPositive(feeTierBps) && feeTierBps >= 100 && feeTierBps <= 10000)
+    ? feeTierBps / 1_000_000
+    : null;
+
   const positionShare = (hasPosition && hasTvl) ? positionValueUSD / tvl : null;
+  const volTvlRatio   = (hasVolume && hasTvl)   ? (volume24h / tvl) * 100 : null;
 
-  // Vol/TVL ratio (informational efficiency metric)
-  const volTvlRatio = (hasVolume && hasTvl) ? (volume24h / tvl) * 100 : null;
-
-  // ── Primary: volume-based ──
+  // ── PRIMARY: volume-based ──────────────────────────────────────────────────
   if (hasVolume && hasTvl && feeFraction != null) {
     const dailyPoolFees   = volume24h * feeFraction;
     const feeAPR          = (dailyPoolFees * 365 / tvl) * 100;
     const userDailyFees   = positionShare != null ? dailyPoolFees * positionShare : null;
     const userMonthlyFees = userDailyFees != null ? userDailyFees * 30 : null;
+    const userAnnualFees  = userDailyFees != null ? userDailyFees * 365 : null;
     return {
       dailyPoolFees,
       feeAPR,
       userDailyFees,
       userMonthlyFees,
+      userAnnualFees,
       positionShare,
       volTvlRatio,
       dataSource: "volume",
-      warning: null,
+      warning:    null,
+      reliable:   true,
     };
   }
 
-  // ── Fallback: APY-based (TVL × APY / 365) ──
-  // Only use when tvl AND apy are available and volume is truly missing
+  // ── FALLBACK: APY-based ───────────────────────────────────────────────────
+  // Only when we truly have NO volume data at all.
   if (hasTvl && isValidPositive(apy) && !hasVolume) {
     const dailyPoolFees   = tvl * (apy / 100) / 365;
-    const feeAPR          = apy;   // by definition
+    const feeAPR          = apy; // by definition: uses reported APY directly
     const userDailyFees   = positionShare != null ? dailyPoolFees * positionShare : null;
     const userMonthlyFees = userDailyFees != null ? userDailyFees * 30 : null;
+    const userAnnualFees  = userDailyFees != null ? userDailyFees * 365 : null;
     return {
       dailyPoolFees,
       feeAPR,
       userDailyFees,
       userMonthlyFees,
+      userAnnualFees,
       positionShare,
-      volTvlRatio: null,
-      dataSource: "apy_fallback",
-      warning: "Volume 24h indisponível. Fees estimados via APY reportado — inclui token rewards; pode superestimar receita de fees pura.",
+      volTvlRatio:    null,
+      dataSource:     "apy_fallback",
+      warning:        "Volume 24h indisponível. Fee estimado via APY reportado — inclui emissões de token. Pode superestimar receita de fees pura. NÃO use para decidir EXIT.",
+      reliable:       false,
     };
   }
 
-  // ── Unavailable ──
+  // ── UNAVAILABLE ───────────────────────────────────────────────────────────
   return {
-    dailyPoolFees:   null,
-    feeAPR:          null,
-    userDailyFees:   null,
-    userMonthlyFees: null,
+    dailyPoolFees:    null,
+    feeAPR:           null,
+    userDailyFees:    null,
+    userMonthlyFees:  null,
+    userAnnualFees:   null,
     positionShare,
-    volTvlRatio:     null,
-    dataSource:      "unavailable",
-    warning:         "Sem dados de volume ou TVL suficientes para calcular fees.",
+    volTvlRatio:      null,
+    dataSource:       "unavailable",
+    warning:          "Dados insuficientes para calcular fees. Forneça volume 24h ou TVL + APY.",
+    reliable:         false,
+  };
+}
+
+// ─── NET ECONOMIC RESULT ──────────────────────────────────────────────────────
+
+/**
+ * The single most important metric for a DeFi LP position:
+ * Are you making or losing money compared to just holding?
+ *
+ * netDailyUSD = userDailyFees - dailyILDrift
+ *
+ * Positive → LP is profitable vs hold today.
+ * Negative → LP is losing money vs hold today.
+ *
+ * Context:
+ *   - This is a FLOW metric (daily). It tells you the DIRECTION of P&L.
+ *   - It does NOT account for accrued IL since entry (that's the IL% already computed).
+ *   - Out-of-range positions: fees = 0, so net = −dailyILDrift.
+ *
+ * @param {number|null} userDailyFees    - daily fee income in USD
+ * @param {number|null} dailyILDrift     - daily IL cost in USD (positive = cost)
+ * @param {boolean}     feeReliable      - whether fee data is from volume (true) or estimated (false)
+ * @returns {{
+ *   netDailyUSD:     number | null,
+ *   annualizedPct:   number | null,  // annualized as % of position value
+ *   isProfit:        boolean | null,
+ *   reliable:        boolean,
+ *   breakdown: {
+ *     feesDailyUSD:  number | null,
+ *     ilDriftDailyUSD: number | null,
+ *   }
+ * }}
+ */
+export function computeNetResult({ userDailyFees, dailyILDrift, positionValueUSD, feeReliable }) {
+  const hasFees    = isValidAmount(userDailyFees);
+  const hasDrift   = isValidAmount(dailyILDrift);
+
+  if (!hasFees && !hasDrift) {
+    return {
+      netDailyUSD:   null,
+      annualizedPct: null,
+      isProfit:      null,
+      reliable:      false,
+      breakdown: { feesDailyUSD: null, ilDriftDailyUSD: null },
+    };
+  }
+
+  const fees  = hasFees  ? userDailyFees  : 0;
+  const drift = hasDrift ? dailyILDrift   : 0;
+  const net   = fees - drift;
+
+  const annualizedPct = isValidPositive(positionValueUSD)
+    ? (net * 365 / positionValueUSD) * 100
+    : null;
+
+  return {
+    netDailyUSD:   net,
+    annualizedPct,
+    isProfit:      net >= 0,
+    reliable:      feeReliable && hasDrift,
+    breakdown: {
+      feesDailyUSD:    hasFees  ? userDailyFees : null,
+      ilDriftDailyUSD: hasDrift ? dailyILDrift  : null,
+    },
   };
 }
 
 // ─── DECISION ENGINE ──────────────────────────────────────────────────────────
 
 /**
- * Generate a structured decision recommendation.
+ * Generate a DECISIVE, ACTIONABLE recommendation.
  *
- * Decision hierarchy (first matching rule wins):
+ * This is the core of the app. It MUST be strict.
  *
- *   EXIT         IL crítico (>12%) AND fees não cobrem IL
- *   REBALANCE    Fora do range definido/sugerido
- *   HOLD         In range AND fees cobrem IL (ou IL negligível)
- *   MONITOR      Score baixo (<45) OR vol extrema (>150%) OR sem dados suficientes
- *   HOLD         Default (pool aceitável, dados insuficientes para outra decisão)
+ * Decision hierarchy (FIRST matching rule wins):
  *
- * @param {object} params
- * @param {object|null}  params.ilResult      - output of computeIL()
- * @param {object|null}  params.rangeStatus   - output of computeRangeStatus()
- * @param {object}       params.feeResult     - output of computeFees()
- * @param {number}       params.score         - pool risk score 0–100
- * @param {number|null}  params.annualVol     - historical annualized volatility %
- * @param {number}       params.apy           - pool APY %
- * @returns {{
- *   action:     'EXIT'|'REBALANCE'|'HOLD'|'MONITOR',
- *   urgency:    'high'|'medium'|'low',
- *   title:      string,
- *   reason:     string,
- *   nextStep:   string,
- *   color:      string,
- *   icon:       string,
- *   confidence: 'high'|'medium'|'low',  // how confident we are (depends on data completeness)
- * }}
+ *  [1] EXIT_CRITICAL
+ *      IL > 15% AND (no fee data OR feeAPR < IL breakeven)
+ *      → "Sair imediatamente. IL crítico irrecuperável."
+ *
+ *  [2] EXIT_INEFFICIENT
+ *      Fee data is RELIABLE (volume-based) AND netDailyUSD < 0 AND IL > 5%
+ *      → "Pool economicamente ineficiente. Fees não compensam IL."
+ *
+ *  [3] REBALANCE
+ *      Out of range (regardless of IL)
+ *      Fees are ZERO when out of range — every day is pure IL drift.
+ *      → "Fora do range. Sem acúmulo de fees."
+ *
+ *  [4] HOLD_STRONG
+ *      In range AND fees reliable AND net > 0 AND IL < 5%
+ *      → "Posição saudável. Mantendo bem."
+ *
+ *  [5] HOLD_WATCH
+ *      In range AND fees cover IL (even if unreliable estimate)
+ *      → "Manter, mas monitorar fees."
+ *
+ *  [6] MONITOR_SCORE
+ *      Score < 45 — protocol/TVL risk too high
+ *      → "Score insuficiente. Risco de protocolo elevado."
+ *
+ *  [7] MONITOR_VOL
+ *      Annualized vol > 150% — range will break frequently
+ *      → "Volatilidade extrema. Custo de gás pode superar fees."
+ *
+ *  [8] HOLD_DEFAULT
+ *      Not enough data to make a stronger call
+ *      → "Dados insuficientes. Forneça entrada e range para análise completa."
+ *
+ * @param {{
+ *   ilResult:      object|null,
+ *   rangeStatus:   object|null,
+ *   feeResult:     object,
+ *   netResult:     object,
+ *   score:         number,
+ *   annualVol:     number|null,
+ *   apy:           number,
+ *   posType:       'lp'|'spot',
+ * }} params
  */
-export function computeDecision({ ilResult, rangeStatus, feeResult, score, annualVol, apy }) {
-  const { feeAPR, dataSource: feeSource } = feeResult;
-  const hasIL    = ilResult != null;
-  const hasRange = rangeStatus != null;
-  const hasFees  = feeAPR != null;
+export function computeDecision({
+  ilResult,
+  rangeStatus,
+  feeResult,
+  netResult,
+  score,
+  annualVol,
+  apy,
+  posType,
+}) {
+  const { feeAPR, dataSource: feeSource, reliable: feeReliable } = feeResult;
+  const hasIL      = ilResult != null;
+  const hasRange   = rangeStatus != null;
+  const hasFeeAPR  = feeAPR != null;
+  const hasNet     = netResult.netDailyUSD != null;
 
-  // How much data do we have? Affects confidence.
-  const dataPoints = [hasIL, hasRange, hasFees].filter(Boolean).length;
-  const confidence = dataPoints >= 3 ? "high" : dataPoints >= 2 ? "medium" : "low";
+  // Confidence = how many data signals we have
+  const signals    = [hasIL, hasRange, hasFeeAPR].filter(Boolean).length;
+  const confidence = signals >= 3 ? "high" : signals >= 2 ? "medium" : "low";
 
-  // ── Rule 1: EXIT ──
-  // IL is critical AND fees clearly cannot recover losses
-  if (hasIL && ilResult.ilAbs > 12) {
-    const ilBreakeven = ilResult.ilAbs; // APY needed to break even annually
-    const feesInsufficient = !hasFees || feeAPR < ilBreakeven;
-    if (feesInsufficient) {
+  // Spot positions: no IL, no range logic applies
+  if (posType === "spot") {
+    return {
+      action:     "HOLD",
+      urgency:    "low",
+      title:      "Posição spot — sem IL",
+      reason:     `Ativo spot (sem LP). Score ${score}/100. Acompanhe P&L pelo custo médio.`,
+      nextStep:   "Compare com custo médio. Defina alvo de saída antes de aportar mais.",
+      color:      "#22c55e",
+      icon:       "💼",
+      confidence: "high",
+    };
+  }
+
+  // ── RULE 1: EXIT_CRITICAL ─────────────────────────────────────────────────
+  if (hasIL && ilResult.ilAbs > 15) {
+    const feesInsufficient = !hasFeeAPR || (feeReliable && feeAPR < ilResult.ilAbs);
+    const unreliableAndLow = !feeReliable && (!hasFeeAPR || feeAPR < ilResult.ilAbs * 1.5);
+    if (feesInsufficient || unreliableAndLow) {
       return {
         action:     "EXIT",
-        urgency:    "high",
-        title:      "Sair da posição",
-        reason:     `IL crítico de ${ilResult.ilAbs.toFixed(1)}% ${hasFees ? `com fee APR de apenas ${feeAPR.toFixed(1)}% — abaixo do breakeven de ${ilBreakeven.toFixed(1)}%` : "sem dados de fee para compensar"}.`,
-        nextStep:   "Remover liquidez e aguardar estabilização do preço antes de remontar.",
+        urgency:    "critical",
+        title:      "Sair da posição — IL crítico",
+        reason:     `IL de ${ilResult.ilAbs.toFixed(1)}% exige fee APR ≥ ${ilResult.ilAbs.toFixed(0)}% para breakeven. ${hasFeeAPR ? `Fee APR ${feeReliable ? "real" : "estimado"}: ${feeAPR.toFixed(1)}% — insuficiente.` : "Sem dados de fee para compensar."}`,
+        nextStep:   "Remover liquidez agora. Aguardar consolidação do preço antes de reentrar.",
         color:      "#ef4444",
         icon:       "🚨",
         confidence,
@@ -311,256 +470,335 @@ export function computeDecision({ ilResult, rangeStatus, feeResult, score, annua
     }
   }
 
-  // ── Rule 2: REBALANCE ──
-  // Out of range (regardless of IL status)
+  // ── RULE 2: EXIT_INEFFICIENT ──────────────────────────────────────────────
+  if (hasIL && ilResult.ilAbs > 5 && feeReliable && hasNet && !netResult.isProfit) {
+    const netStr = netResult.netDailyUSD != null
+      ? `Você perde $${Math.abs(netResult.netDailyUSD).toFixed(4)}/dia vs hold.`
+      : "";
+    return {
+      action:     "EXIT",
+      urgency:    "high",
+      title:      "Pool economicamente ineficiente",
+      reason:     `Fees reais (${feeAPR.toFixed(1)}%/aa) não compensam IL de ${ilResult.ilAbs.toFixed(1)}%. ${netStr}`,
+      nextStep:   "Migrar para pool com fee APR > IL ou para stable/stable sem IL.",
+      color:      "#ef4444",
+      icon:       "⛔",
+      confidence,
+    };
+  }
+
+  // ── RULE 3: REBALANCE ─────────────────────────────────────────────────────
   if (hasRange && !rangeStatus.inRange) {
-    const distStr = rangeStatus.distancePct.toFixed(1);
-    const boundary = rangeStatus.nearestBoundary === "min" ? "mínimo" : "máximo";
+    const bdLabel = rangeStatus.nearestBoundary === "min" ? "inferior" : "superior";
     return {
       action:     "REBALANCE",
-      urgency:    "medium",
-      title:      "Remontar range",
-      reason:     `Preço ${distStr}% além do limite ${boundary} do range${rangeStatus.source === "suggested" ? " sugerido" : " definido"}. Posição não acumula fees fora do range.`,
-      nextStep:   `Retirar liquidez e reabrir com novo range centrado no preço atual${annualVol ? ` (vol ${annualVol.toFixed(0)}%/aa)` : ""}.`,
+      urgency:    "high",
+      title:      "Fora do range — fees zerados",
+      reason:     `Preço ${rangeStatus.distancePct.toFixed(1)}% além do limite ${bdLabel}${rangeStatus.source === "suggested" ? " (range sugerido)" : ""}. Posição não acumula fees. Apenas IL drift.`,
+      nextStep:   `Retirar e reabrir range centrado no preço atual${annualVol ? ` (vol ${annualVol.toFixed(0)}%/aa — use sigma 1.5–2)` : ""}.`,
       color:      "#f59e0b",
       icon:       "🔄",
       confidence,
     };
   }
 
-  // ── Rule 3: HOLD ──
-  // In range AND either (fees cover IL) or (IL is negligible)
-  if (hasRange && rangeStatus.inRange) {
-    const ilNegligible = !hasIL || ilResult.ilAbs < 2;
-    const feesOk       = hasFees && feeAPR >= (ilResult?.ilAbs ?? 0);
-    if (ilNegligible || feesOk) {
-      const feeLabel = hasFees ? `Fee APR ${feeAPR.toFixed(1)}%` : "fees não calculados";
+  // ── RULE 4: HOLD_STRONG ───────────────────────────────────────────────────
+  if (hasRange && rangeStatus.inRange && feeReliable && hasNet && netResult.isProfit && hasIL && ilResult.ilAbs < 5) {
+    const netPct = netResult.annualizedPct != null ? ` (net ${netResult.annualizedPct.toFixed(1)}%/aa)` : "";
+    return {
+      action:     "HOLD",
+      urgency:    "low",
+      title:      "Manter — posição saudável",
+      reason:     `In range. Fees (${feeAPR.toFixed(1)}%/aa) superam IL (${ilResult.ilAbs.toFixed(2)}%). Net positivo${netPct}. $${netResult.netDailyUSD.toFixed(4)}/dia vs hold.`,
+      nextStep:   "Monitorar semanalmente. Revisar range se preço se aproximar dos limites.",
+      color:      "#22c55e",
+      icon:       "✅",
+      confidence,
+    };
+  }
+
+  // ── RULE 5: HOLD_WATCH ────────────────────────────────────────────────────
+  if (hasRange && rangeStatus.inRange && hasFeeAPR) {
+    const ilBreakeven = hasIL ? ilResult.ilAbs : 0;
+    const feeCoversIL = feeAPR >= ilBreakeven;
+    if (feeCoversIL) {
+      const label = feeReliable ? `Fee real ${feeAPR.toFixed(1)}%` : `Fee estimado ${feeAPR.toFixed(1)}% (via APY — inclui rewards)`;
       return {
         action:     "HOLD",
         urgency:    "low",
-        title:      "Manter posição",
-        reason:     `In range${hasIL ? ` — IL ${ilResult.ilAbs.toFixed(2)}%` : ""}. ${feeLabel}${feesOk ? " cobre IL." : "."}${feeSource === "apy_fallback" ? " (fee estimado via APY)" : ""}`,
-        nextStep:   "Monitorar semanalmente. Revisar range se preço se aproximar dos limites.",
-        color:      "#22c55e",
-        icon:       "✅",
-        confidence,
+        title:      "Manter — fees cobrem IL",
+        reason:     `In range. ${label}${hasIL ? ` ≥ IL breakeven ${ilBreakeven.toFixed(1)}%` : ""}. ${feeReliable ? "" : "⚠ Confirme com volume real."}`,
+        nextStep:   "Acompanhar volume do pool. Revisar se fees reais baixarem de " + (ilBreakeven > 0 ? `${ilBreakeven.toFixed(0)}%` : "10%") + ".",
+        color:      "#f59e0b",
+        icon:       "👁",
+        confidence: feeReliable ? confidence : "low",
       };
     }
     // In range but fees don't cover IL
-    if (hasIL && hasFees && feeAPR < ilResult.ilAbs) {
+    if (hasIL && feeAPR < ilBreakeven) {
       return {
         action:     "MONITOR",
         urgency:    "medium",
-        title:      "Monitorar — fees abaixo do breakeven",
-        reason:     `In range, mas fee APR ${feeAPR.toFixed(1)}% não cobre IL breakeven de ${ilResult.ilAbs.toFixed(1)}%. Posição perde valor líquido.`,
-        nextStep:   `Avaliar migração para pool com fee APR ≥ ${ilResult.ilAbs.toFixed(0)}% para o mesmo par.`,
-        color:      "#f59e0b",
-        icon:       "👁",
+        title:      "Monitorar — fee APR abaixo do breakeven",
+        reason:     `In range, mas ${feeReliable ? "fee real" : "fee estimado"} ${feeAPR.toFixed(1)}% < IL breakeven ${ilBreakeven.toFixed(1)}%. Posição perde valor diariamente vs hold.`,
+        nextStep:   `Buscar pool com fee APR ≥ ${Math.ceil(ilBreakeven)}% no mesmo par. Ou remontar em stable/stable.`,
+        color:      "#f97316",
+        icon:       "⚠",
         confidence,
       };
     }
   }
 
-  // ── Rule 4: MONITOR (score baixo ou vol extrema) ──
+  // ── RULE 6: MONITOR_SCORE ─────────────────────────────────────────────────
   if (score < 45) {
     return {
       action:     "MONITOR",
       urgency:    "medium",
       title:      "Monitorar — score baixo",
-      reason:     `Score ${score}/100 abaixo do nível seguro (45). Protocolo ou TVL insuficiente para confiança alta.`,
-      nextStep:   "Considerar migração para pool score ≥ 65 com mesmo par.",
+      reason:     `Score ${score}/100 indica protocolo ou TVL insuficiente para confiança alta. Risco de smart contract elevado.`,
+      nextStep:   "Migrar para pool score ≥ 65 no mesmo par.",
       color:      "#f97316",
       icon:       "⚠",
       confidence,
     };
   }
+
+  // ── RULE 7: MONITOR_VOL ───────────────────────────────────────────────────
   if (annualVol != null && annualVol > 150) {
     return {
       action:     "MONITOR",
       urgency:    "medium",
       title:      "Monitorar — volatilidade extrema",
-      reason:     `Vol histórica de ${annualVol.toFixed(0)}%/aa. Range estreito sai rapidamente; custo de gás para remontar pode superar fees.`,
-      nextStep:   "Usar range mais amplo (2σ) ou migrar para pool stable/stable.",
+      reason:     `Vol histórica ${annualVol.toFixed(0)}%/aa. Range sai em dias. Custo de gás para remontar pode superar fees acumulados.`,
+      nextStep:   "Usar range 2σ ou mais. Ou migrar para stable/stable.",
       color:      "#f97316",
       icon:       "📡",
       confidence,
     };
   }
 
-  // ── Rule 5: HOLD (default — dados insuficientes para outra decisão) ──
-  const dataNote = confidence === "low"
-    ? " Dados insuficientes para análise completa — informe preço de entrada e range."
-    : "";
+  // ── RULE 8: HOLD_DEFAULT ─────────────────────────────────────────────────
+  const missing = [];
+  if (!hasIL) missing.push("preço de entrada (LP)");
+  if (!hasRange) missing.push("range min/max");
+  if (!hasFeeAPR) missing.push("volume 24h");
   return {
     action:     "HOLD",
     urgency:    "low",
-    title:      "Manter posição",
-    reason:     `Pool dentro dos parâmetros aceitáveis (score ${score}/100).${dataNote}`,
-    nextStep:   "Monitorar semanalmente. Adicionar preço de entrada e range para análise completa.",
-    color:      "#22c55e",
-    icon:       confidence === "low" ? "📊" : "✅",
-    confidence,
+    title:      "Manter — dados insuficientes para análise completa",
+    reason:     `Score ${score}/100 aceitável. Não é possível avaliar IL vs fees sem: ${missing.join(", ")}.`,
+    nextStep:   `Informe ${missing.join(" e ")} para obter recomendação confiável.`,
+    color:      "#94a3b8",
+    icon:       "📊",
+    confidence: "low",
   };
 }
 
-// ─── STATIC AI SUMMARY (no API call required) ─────────────────────────────────
+// ─── STATIC SUMMARY ───────────────────────────────────────────────────────────
 
 /**
- * Generate a rule-based text summary that works even without an AI API call.
- * This is the fallback shown immediately — before the user clicks "Gerar análise com IA".
- *
- * @param {object} params
- * @param {string}       params.sym
- * @param {object}       params.decision     - output of computeDecision()
- * @param {object|null}  params.ilResult     - output of computeIL()
- * @param {object|null}  params.rangeStatus  - output of computeRangeStatus()
- * @param {object}       params.feeResult    - output of computeFees()
- * @param {number}       params.apy
- * @param {number}       params.score
- * @param {number|null}  params.annualVol
- * @returns {string}
+ * Rule-based text summary. No API call needed.
+ * Shows the most important facts in 4–6 sentences.
  */
-export function generateStaticSummary({ sym, decision, ilResult, rangeStatus, feeResult, apy, score, annualVol }) {
+export function generateStaticSummary({
+  sym, decision, ilResult, rangeStatus,
+  feeResult, netResult, apy, score, annualVol,
+  posType, currentPrice, entryPrice,
+}) {
   const parts = [];
 
-  // 1. Pool identity + score
-  parts.push(`${sym}: score ${score}/100 (${score >= 75 ? "baixo risco" : score >= 55 ? "risco médio" : score >= 35 ? "risco alto" : "muito arriscado"}).`);
+  // 1. Identity + score
+  const riskLabel = score >= 75 ? "baixo risco" : score >= 55 ? "risco médio" : score >= 35 ? "risco alto" : "risco muito alto";
+  parts.push(`${sym}: score ${score}/100 (${riskLabel}).`);
 
-  // 2. IL status
-  if (ilResult) {
-    const sev = ilSeverity(ilResult.ilAbs);
-    parts.push(`IL atual ${ilResult.il.toFixed(2)}% (${sev.label}) com ratio de preço ${ilResult.ratio.toFixed(2)}×.`);
-  } else {
-    parts.push("IL não calculado — informe o preço de entrada para análise completa.");
+  // 2. Price context (only for LP)
+  if (posType === "lp") {
+    if (currentPrice && entryPrice) {
+      const changePct = ((currentPrice - entryPrice) / entryPrice) * 100;
+      parts.push(`Preço atual $${currentPrice.toLocaleString("pt-BR", {maximumFractionDigits:2})} vs entrada $${entryPrice.toLocaleString("pt-BR", {maximumFractionDigits:2})} (${changePct >= 0 ? "+" : ""}${changePct.toFixed(1)}%).`);
+    } else if (!entryPrice) {
+      parts.push("Preço de entrada LP não informado — IL não calculado.");
+    }
   }
 
-  // 3. Range status
+  // 3. IL
+  if (ilResult && posType === "lp") {
+    const sev = ilSeverity(ilResult.ilAbs);
+    parts.push(`IL atual: ${ilResult.il.toFixed(2)}% (${sev.label}, ratio ${ilResult.ratio.toFixed(3)}×). Breakeven mínimo: fee APR ≥ ${ilResult.ilAbs.toFixed(1)}%/aa.`);
+  }
+
+  // 4. Range
   if (rangeStatus) {
     if (rangeStatus.inRange) {
-      parts.push(`Posição in range (${rangeStatus.source === "suggested" ? "range sugerido" : "range definido"}).`);
+      parts.push(`✅ In range (${rangeStatus.source === "suggested" ? "range sugerido" : "range definido"}).`);
     } else {
-      parts.push(`Posição OUT OF RANGE — ${rangeStatus.distancePct.toFixed(1)}% além do limite ${rangeStatus.nearestBoundary === "min" ? "inferior" : "superior"}. Fees zerados.`);
+      parts.push(`🚨 OUT OF RANGE: ${rangeStatus.distancePct.toFixed(1)}% além do limite ${rangeStatus.nearestBoundary === "min" ? "inferior" : "superior"}. Fees zerados.`);
     }
-  } else {
-    parts.push("Range não definido — configure ou aceite o range sugerido.");
   }
 
-  // 4. Fees
+  // 5. Fees + net
   if (feeResult.feeAPR != null) {
-    const src = feeResult.dataSource === "apy_fallback" ? " (estimativa via APY)" : "";
-    parts.push(`Fee APR estimado: ${feeResult.feeAPR.toFixed(1)}%${src}.`);
-  } else {
-    parts.push("Dados de volume insuficientes. Evite decisões de aporte até confirmação do volume real.");
+    const src = feeResult.dataSource === "volume"
+      ? "via volume real"
+      : "estimado via APY (inclui rewards)";
+    parts.push(`Fee APR: ${feeResult.feeAPR.toFixed(1)}% (${src}).`);
+  }
+  if (netResult.netDailyUSD != null && feeResult.dataSource === "volume") {
+    const sign = netResult.isProfit ? "+" : "-";
+    parts.push(`Resultado líquido vs hold: ${sign}$${Math.abs(netResult.netDailyUSD).toFixed(netResult.netDailyUSD < 0.01 ? 6 : 4)}/dia${netResult.annualizedPct != null ? ` (${sign}${Math.abs(netResult.annualizedPct).toFixed(1)}%/aa)` : ""}.`);
   }
 
-  // 5. Volatility context
+  // 6. Volatility
   if (annualVol != null) {
     const vLabel = annualVol < 30 ? "baixa" : annualVol < 70 ? "média" : annualVol < 120 ? "alta" : "extrema";
-    parts.push(`Volatilidade histórica ${annualVol.toFixed(0)}%/aa (${vLabel}).`);
+    parts.push(`Volatilidade histórica: ${annualVol.toFixed(0)}%/aa (${vLabel}).`);
   }
 
-  // 6. Decision
-  parts.push(`Decisão: ${decision.icon} ${decision.title}. ${decision.nextStep}`);
+  // 7. Decision
+  parts.push(`${decision.icon} ${decision.title}: ${decision.nextStep}`);
 
   return parts.join(" ");
 }
 
-// ─── POSITION SHARE FORMATTING ───────────────────────────────────────────────
+// ─── FORMATTING HELPERS ───────────────────────────────────────────────────────
 
 /**
  * Format a position share fraction (0–1) as a human-readable percentage.
- *
- * Examples:
- *   0.5       → "50.0000%"
- *   0.0001    → "0.0100%"
- *   0.0000001 → "0.0000001%"   (never scientific notation)
- *   0         → "0%"
- *   null      → "—"
- *
- * @param {number|null} share - fraction 0–1
- * @param {number} [minDecimals=4] - minimum decimal places shown
- * @returns {string}
+ * Uses enough decimal places to show 3 significant figures.
+ * NEVER uses scientific notation.
  */
 export function formatShare(share) {
   if (share == null || !isFinite(share)) return "—";
   const pct = share * 100;
   if (pct === 0) return "0%";
-
-  // Determine how many decimal places we need to show at least 3 sig figs
   if (pct >= 1)      return `${pct.toFixed(4)}%`;
   if (pct >= 0.01)   return `${pct.toFixed(6)}%`;
-
-  // For very small shares, use enough decimal places to show non-zero digits
-  // e.g. 4.12e-8 → 0.0000000412%
   const decimals = Math.max(0, -Math.floor(Math.log10(pct))) + 3;
   return `${pct.toFixed(Math.min(decimals, 12))}%`;
 }
 
-// ─── FULL POSITION ANALYSIS ───────────────────────────────────────────────────
+/**
+ * Format a USD value with appropriate precision.
+ * For very small values (fees < $0.01), show enough decimals.
+ */
+export function formatUSD(n) {
+  if (n == null || !isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  if (abs >= 1_000_000)  return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000)      return `${sign}$${(abs / 1_000).toFixed(2)}K`;
+  if (abs >= 1)          return `${sign}$${abs.toFixed(2)}`;
+  if (abs >= 0.001)      return `${sign}$${abs.toFixed(4)}`;
+  if (abs >= 0.000001)   return `${sign}$${abs.toFixed(6)}`;
+  // Never show scientific notation
+  return `${sign}$${abs.toFixed(8)}`;
+}
+
+// ─── MAIN PIPELINE ────────────────────────────────────────────────────────────
 
 /**
- * Run the complete analysis pipeline for a single position.
- * This is the main entry point consumed by PoolAnalysisPanel.
+ * Run the full analysis pipeline for one position.
+ * This is the single entry point consumed by PoolAnalysisPanel.
  *
- * @param {object} params
- * @param {object}       params.position      - portfolio position
- * @param {object|null}  params.matchedPool   - pool from DeFiLlama
- * @param {number|null}  params.currentPrice  - live price from CoinGecko/prices prop
- * @param {number|null}  params.annualVol     - historical annualized vol %
- * @param {object|null}  params.suggestedRange - from suggestLPRange()
- * @returns {object} - full analysis result used directly by PoolAnalysisPanel
+ * @param {{
+ *   position:       object,      // portfolio position record
+ *   matchedPool:    object|null, // matched DeFiLlama pool (has tvlUsd, apy, volumeUsd7d)
+ *   currentPrice:   number|null, // live price from CoinGecko
+ *   annualVol:      number|null, // historical annualized vol %
+ *   suggestedRange: object|null, // from suggestLPRange()
+ * }} params
  */
-export function runPositionAnalysis({ position, matchedPool, currentPrice, annualVol, suggestedRange }) {
+export function runPositionAnalysis({
+  position,
+  matchedPool,
+  currentPrice,
+  annualVol,
+  suggestedRange,
+}) {
   const src = matchedPool || position;
 
-  // ── Resolve canonical entry price ──
+  // ── Detect position type ──────────────────────────────────────────────────
+  const posType = detectPositionType(position);
+
+  // ── Resolve canonical entry price ────────────────────────────────────────
   const entryPrice = resolveEntryPrice(position);
 
-  // ── Pool data ──
-  const tvl      = Number(src?.tvlUsd     || position?.tvlUsd     || 0) || null;
-  const vol24h   = Number(src?.volumeUsd7d || position?.volumeUsd7d || 0)
-    ? Number(src.volumeUsd7d) / 7
-    : null;
-  const apy      = Number(src?.apy || position?.apy || 0);
-  const score    = Number(src?._score || position?._score || 0);
-  const feeTierBps = Number(position?.feeTier || src?.feeTier || 3000);
+  // ── Pool data (prefer matchedPool for real on-chain data) ─────────────────
+  const tvl         = Number(src?.tvlUsd      || position?.tvlUsd      || 0) || null;
+  const rawVol7d    = Number(src?.volumeUsd7d  || position?.volumeUsd7d || 0);
+  // Only use volume data if it actually exists
+  const vol24h      = rawVol7d > 0 ? rawVol7d / 7 : null;
+  const apy         = Number(src?.apy || position?.apy || 0);
+  const score       = Number(src?._score || position?._score || 0);
+  const feeTierBps  = Number(position?.feeTier || src?.feeTier || 3000);
   const posValueUSD = Number(position?.valueUSD || 0) || null;
 
-  // ── IL ──
-  const ilResult = computeIL(currentPrice, entryPrice);
+  // ── IL (LP only) ──────────────────────────────────────────────────────────
+  const ilResult = (posType === "lp")
+    ? computeIL(currentPrice, entryPrice)
+    : null;
 
-  // ── Range ──
+  // ── Range ─────────────────────────────────────────────────────────────────
   const userMin  = Number(position?.rangeMin)  || null;
   const userMax  = Number(position?.rangeMax)  || null;
-  const range    = resolveRange(userMin, userMax, suggestedRange);
+  const range    = (posType === "lp")
+    ? resolveRange(userMin, userMax, suggestedRange)
+    : null;
   const rangeStatus = computeRangeStatus(currentPrice, range);
 
-  // ── Fees ──
+  // ── Fees ──────────────────────────────────────────────────────────────────
   const feeResult = computeFees({
-    volume24h:        isValidPositive(vol24h) ? vol24h : null,
-    tvl:              isValidPositive(tvl)    ? tvl    : null,
+    volume24h:        isValidPositive(vol24h)      ? vol24h      : null,
+    tvl:              isValidPositive(tvl)          ? tvl         : null,
     feeTierBps,
-    positionValueUSD: isValidPositive(posValueUSD) ? posValueUSD : null,
+    positionValueUSD: isValidPositive(posValueUSD) ? posValueUSD  : null,
     apy,
   });
 
-  // ── Decision ──
-  const decision = computeDecision({ ilResult, rangeStatus, feeResult, score, annualVol, apy });
+  // ── Daily IL drift (LP in range only) ────────────────────────────────────
+  const inRange        = rangeStatus?.inRange ?? false;
+  const dailyILDrift   = (posType === "lp")
+    ? estimateDailyILDrift(posValueUSD, annualVol, inRange)
+    : null;
 
-  // ── Static summary ──
+  // ── Net result ────────────────────────────────────────────────────────────
+  const netResult = computeNetResult({
+    userDailyFees:   feeResult.userDailyFees,
+    dailyILDrift,
+    positionValueUSD: posValueUSD,
+    feeReliable:     feeResult.reliable,
+  });
+
+  // ── Decision ──────────────────────────────────────────────────────────────
+  const decision = computeDecision({
+    ilResult,
+    rangeStatus,
+    feeResult,
+    netResult,
+    score,
+    annualVol,
+    apy,
+    posType,
+  });
+
+  // ── Static summary ────────────────────────────────────────────────────────
   const staticSummary = generateStaticSummary({
-    sym: (position?.symbol || "").toUpperCase().replace(/_/g, "/"),
+    sym:          (position?.symbol || "").toUpperCase().replace(/_/g, "/"),
     decision,
     ilResult,
     rangeStatus,
     feeResult,
+    netResult,
     apy,
     score,
     annualVol,
+    posType,
+    currentPrice,
+    entryPrice,
   });
 
   return {
-    // Inputs (resolved)
+    // Resolved inputs
     entryPrice,
     currentPrice,
     tvl,
@@ -569,12 +807,15 @@ export function runPositionAnalysis({ position, matchedPool, currentPrice, annua
     score,
     feeTierBps,
     posValueUSD,
+    posType,
 
     // Analysis outputs
     ilResult,
+    dailyILDrift,
     range,
     rangeStatus,
     feeResult,
+    netResult,
     decision,
     staticSummary,
     suggestedRange,
