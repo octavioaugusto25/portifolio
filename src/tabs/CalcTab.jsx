@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { fmt } from "../utils";
 import { Card, SecTitle } from "../components/primitives";
 
@@ -9,6 +9,8 @@ export function CalcTab({prices, market}) {
   const [capUsd,setCapUsd]=useState("5000");
   const [apy,setApy]=useState("35");
   const [meses,setMeses]=useState("12");
+  const [autoSync,setAutoSync]=useState(true);
+  const [lastSync,setLastSync]=useState(null);
   const total=Object.values(alloc).reduce((a,b)=>a+b,0);
   const usd=Number(brl.replace(/\./g,"").replace(",","."))/6.0;
   const c=Number(capUsd.replace(",","."))||0,r=Number(apy)/100,m=Number(meses);
@@ -44,7 +46,12 @@ export function CalcTab({prices, market}) {
       caixa: cycleTarget.cash,
       learn: cycleTarget.learn,
     });
+    setLastSync(new Date());
   };
+  useEffect(()=>{
+    if(autoSync) applyCycleTarget();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[mode, autoSync]);
   return (
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}}>
       <Card>
@@ -57,7 +64,11 @@ export function CalcTab({prices, market}) {
             </div>
           ))}
         </div>
-        <button onClick={applyCycleTarget} style={{width:"100%",padding:"7px 10px",borderRadius:"7px",border:"1px solid rgba(99,102,241,0.3)",background:"rgba(99,102,241,0.12)",color:"#a5b4fc",fontSize:"10px",cursor:"pointer",marginBottom:"12px"}}>Aplicar alocação do ciclo</button>
+        <div style={{display:"flex",gap:"8px",marginBottom:"12px"}}>
+          <button onClick={applyCycleTarget} style={{flex:1,padding:"7px 10px",borderRadius:"7px",border:"1px solid rgba(99,102,241,0.3)",background:"rgba(99,102,241,0.12)",color:"#a5b4fc",fontSize:"10px",cursor:"pointer"}}>Sincronizar agora</button>
+          <button onClick={()=>setAutoSync(v=>!v)} style={{padding:"7px 10px",borderRadius:"7px",border:"1px solid rgba(34,197,94,0.3)",background:autoSync?"rgba(34,197,94,0.14)":"rgba(0,0,0,0.2)",color:autoSync?"#22c55e":"#94a3b8",fontSize:"10px",cursor:"pointer"}}>{autoSync?"Auto Sync ON":"Auto Sync OFF"}</button>
+        </div>
+        <div style={{fontSize:"9px",color:"#64748b",marginBottom:"12px"}}>Última sincronização: {lastSync?lastSync.toLocaleTimeString("pt-BR"):"—"}</div>
         <SecTitle icon="🧮">Alocação de Capital</SecTitle>
         <div style={{marginBottom:"14px"}}>
           <div style={{fontSize:"9px",color:"#334155",letterSpacing:"1px",marginBottom:"4px",fontFamily:"monospace"}}>CAPITAL (R$)</div>
