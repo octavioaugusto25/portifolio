@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { VOLATILITY_COIN_MAP } from "../constants";
-import { calcChainConcentration, calcDiversificationScore, calcPortfolioScore, calcRiskConcentration, extractTokens, fmt, getRisk, getVolLabel, isPairSS, isStable } from "../utils";
+import { calcChainConcentration, calcDiversificationScore, calcPortfolioScore, calcRiskConcentration, extractTokens, fmt, getRisk, getVolLabel, isStable } from "../utils";
 import { Card, SecTitle } from "../components/primitives";
 
 // ─── 11. PORTFOLIO TAB ────────────────────────────────────────────────────────
-export function PortfolioTab({pools, volData, market, walletPools = [], walletLoading = false, onFetchWalletPools, onSuggestRebuild}) {
+export function PortfolioTab({pools, volData, walletPools = [], walletLoading = false, onFetchWalletPools, onSuggestRebuild}) {
   const STORAGE_KEY = "portfolio-positions-v2";
   const [positions, setPositions] = useState([]);
   const [showAdd,   setShowAdd]   = useState(false);
@@ -59,44 +59,8 @@ export function PortfolioTab({pools, volData, market, walletPools = [], walletLo
   const filteredPools = pools.filter(p=>poolSearch?p.symbol?.toLowerCase().includes(poolSearch.toLowerCase())||p.project?.toLowerCase().includes(poolSearch.toLowerCase()):true).slice(0,6);
 
   const divColor = divScore>=70?"#22c55e":divScore>=40?"#f59e0b":"#ef4444";
-  const marketMode = market?.mode || "LATERAL";
-  const bullAlloc = { btc:40, alt:40, passive:10, cash:5, learn:5 };
-  const bearAlloc = { btc:60, alt:5, passive:10, cash:25, learn:0 };
-  const neutralAlloc = { btc:50, alt:25, passive:15, cash:10, learn:0 };
-  const targetAlloc = marketMode.includes("BULL") ? bullAlloc : marketMode.includes("BEAR") ? bearAlloc : neutralAlloc;
-  const currentBuckets = positions.reduce((acc,p)=>{
-    const sym=(p.symbol||"").toUpperCase();
-    const proto=(p.protocol||"").toLowerCase();
-    const v=p.valueUSD||0;
-    if(sym.includes("BTC")||sym.includes("WBTC")) acc.btc+=v;
-    else if(isPairSS(p.symbol)||["aave","compound","spark","lending"].some(k=>proto.includes(k))) acc.passive+=v;
-    else acc.alt+=v;
-    return acc;
-  },{btc:0,alt:0,passive:0,cash:0,learn:0});
-  const currentPct = Object.fromEntries(Object.entries(currentBuckets).map(([k,v])=>[k,totalValue>0?(v/totalValue*100):0]));
-  const allocLabels = {btc:"BTC",alt:"Altcoins",passive:"Renda passiva",cash:"Caixa",learn:"Aprender"};
-
   return (
     <div style={{display:"flex",flexDirection:"column",gap:"14px"}}>
-      <Card>
-        <SecTitle icon="🧭" sub={`Regra automática por ciclo de mercado (${marketMode})`}>Alocação alvo</SecTitle>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px"}}>
-          {Object.entries(targetAlloc).map(([k,v])=>(
-            <div key={k} style={{padding:"8px",background:"rgba(0,0,0,0.2)",borderRadius:"8px"}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:"10px",marginBottom:"4px"}}>
-                <span style={{color:"#64748b"}}>{allocLabels[k]}</span>
-                <span style={{color:"#a5b4fc",fontFamily:"monospace"}}>alvo {v}% · atual {currentPct[k].toFixed(1)}%</span>
-              </div>
-              <div style={{height:"5px",background:"rgba(255,255,255,0.05)",borderRadius:"3px",overflow:"hidden",position:"relative"}}>
-                <div style={{height:"100%",width:`${Math.min(100,v)}%`,background:"rgba(99,102,241,0.6)"}}/>
-                <div style={{position:"absolute",top:0,left:`${Math.min(100,currentPct[k])}%`,width:"2px",height:"100%",background:"#22c55e"}}/>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div style={{fontSize:"9px",color:"#475569",marginTop:"8px"}}>Linha azul = alvo | marcador verde = composição atual do portfólio.</div>
-      </Card>
-
       <Card>
         <SecTitle icon="🧷" sub="Cole seu endereço para buscar posições LP ativas (Uniswap v3)">Carteira on-chain</SecTitle>
         <div style={{display:"flex",gap:"8px",marginBottom:"10px"}}>

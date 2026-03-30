@@ -3,9 +3,9 @@ import { fmt } from "../utils";
 import { Card, SecTitle } from "../components/primitives";
 
 // ─── CALC TAB ─────────────────────────────────────────────────────────────────
-export function CalcTab({prices}) {
+export function CalcTab({prices, market}) {
   const [brl,setBrl]=useState("10000");
-  const [alloc,setAlloc]=useState({btc:30,eth:20,sol:10,stable:25,caixa:15});
+  const [alloc,setAlloc]=useState({btc:30,eth:20,sol:10,stable:25,caixa:10,learn:5});
   const [capUsd,setCapUsd]=useState("5000");
   const [apy,setApy]=useState("35");
   const [meses,setMeses]=useState("12");
@@ -19,10 +19,45 @@ export function CalcTab({prices}) {
     {key:"sol",label:"◎ Solana",color:"#a78bfa",price:prices?.solana?.usd,sym:"SOL"},
     {key:"stable",label:"$ Stablecoins",color:"#22c55e",price:1,sym:"USDC"},
     {key:"caixa",label:"🏦 Caixa BRL",color:"#64748b",price:null,sym:null},
+    {key:"learn",label:"📚 Aprender",color:"#e879f9",price:null,sym:null},
   ];
+  const mode = market?.mode || "LATERAL";
+  const cycleTarget = mode.includes("BULL")
+    ? { btc:40, alt:40, passive:10, cash:5, learn:5 }
+    : mode.includes("BEAR")
+      ? { btc:60, alt:5, passive:10, cash:25, learn:0 }
+      : { btc:50, alt:20, passive:15, cash:15, learn:0 };
+  const currentCycle = {
+    btc: alloc.btc,
+    alt: alloc.eth + alloc.sol,
+    passive: alloc.stable,
+    cash: alloc.caixa,
+    learn: alloc.learn,
+  };
+  const applyCycleTarget = () => {
+    const altHalf = cycleTarget.alt / 2;
+    setAlloc({
+      btc: cycleTarget.btc,
+      eth: altHalf,
+      sol: altHalf,
+      stable: cycleTarget.passive,
+      caixa: cycleTarget.cash,
+      learn: cycleTarget.learn,
+    });
+  };
   return (
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}}>
       <Card>
+        <SecTitle icon="🧭" sub={`Ciclo do BTC: ${mode}`}>Alocação por ciclo BTC</SecTitle>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"12px"}}>
+          {Object.entries(cycleTarget).map(([k,v])=>(
+            <div key={k} style={{padding:"7px",background:"rgba(0,0,0,0.2)",borderRadius:"7px",fontSize:"10px",display:"flex",justifyContent:"space-between"}}>
+              <span style={{color:"#64748b"}}>{k.toUpperCase()}</span>
+              <span style={{color:"#a5b4fc",fontFamily:"monospace"}}>{currentCycle[k].toFixed(1)}% / alvo {v}%</span>
+            </div>
+          ))}
+        </div>
+        <button onClick={applyCycleTarget} style={{width:"100%",padding:"7px 10px",borderRadius:"7px",border:"1px solid rgba(99,102,241,0.3)",background:"rgba(99,102,241,0.12)",color:"#a5b4fc",fontSize:"10px",cursor:"pointer",marginBottom:"12px"}}>Aplicar alocação do ciclo</button>
         <SecTitle icon="🧮">Alocação de Capital</SecTitle>
         <div style={{marginBottom:"14px"}}>
           <div style={{fontSize:"9px",color:"#334155",letterSpacing:"1px",marginBottom:"4px",fontFamily:"monospace"}}>CAPITAL (R$)</div>
@@ -65,4 +100,3 @@ export function CalcTab({prices}) {
     </div>
   );
 }
-

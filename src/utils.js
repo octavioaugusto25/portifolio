@@ -143,12 +143,10 @@ export function getStrategy(pool) {
 }
 export function getMarketContext(prices) {
   if (!prices) return { mode: "UNKNOWN", color: "#64748b", icon: "❓", advice: "Aguardando dados..." };
-  const avg = ((prices.bitcoin?.change24h || 0) + (prices.ethereum?.change24h || 0)) / 2;
-  if (avg > 3) return { mode: "BULL 🐂", color: "#22c55e", icon: "📈", advice: "Alta — favoreça pools voláteis de protocolos top para capturar upside." };
-  if (avg < -3) return { mode: "BEAR 🐻", color: "#ef4444", icon: "📉", advice: "Queda — priorize stable/stable e reduza exposição a voláteis." };
-  if (avg > 1) return { mode: "BULLISH", color: "#86efac", icon: "↗", advice: "Leve alta — boa hora para pools stable/volátil auditadas." };
-  if (avg < -1) return { mode: "BEARISH", color: "#fca5a5", icon: "↘", advice: "Leve baixa — monitore posições voláteis, considere hedge." };
-  return { mode: "LATERAL", color: "#94a3b8", icon: "→", advice: "Lateral — ideal para stable yields e range trading." };
+  const btc24h = prices.bitcoin?.change24h || 0;
+  if (btc24h >= 2.5) return { mode: "BULL 🐂", color: "#22c55e", icon: "📈", advice: "BTC forte no curto prazo — aumente exposição tática em altcoins com gestão de risco." };
+  if (btc24h <= -2.5) return { mode: "BEAR 🐻", color: "#ef4444", icon: "📉", advice: "BTC pressionado — priorize caixa e renda passiva defensiva." };
+  return { mode: "LATERAL", color: "#94a3b8", icon: "→", advice: "BTC sem direção clara no curto prazo — gestão ativa e exposição moderada." };
 }
 export function detectNarratives(pools, prices) {
   const narratives = [];
