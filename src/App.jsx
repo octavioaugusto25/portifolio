@@ -122,17 +122,8 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
     setVolLoading(true);
     setDataStatus(s => ({ ...s, vol: "loading" }));
     const result = {};
-    // Principais tokens + ANZ — DeFiLlama /chart, 1 por vez (sem rate limit)
-    const coinsToFetch = [
-      { sym: "ETH",    llamaId: "coingecko:ethereum"           },
-      { sym: "BTC",    llamaId: "coingecko:bitcoin"            },
-      { sym: "SOL",    llamaId: "coingecko:solana"             },
-      { sym: "ARB",    llamaId: "coingecko:arbitrum"           },
-      { sym: "OP",     llamaId: "coingecko:optimism"           },
-      { sym: "LINK",   llamaId: "coingecko:chainlink"          },
-      { sym: "AERO",   llamaId: "coingecko:aerodrome-finance"  },
-      { sym: "ANZ",    llamaId: "base:0xeeC468333ccc16D4BF1cEf497A56cf8C0aAe4Ca3" },
-    ];
+    // Todos os tokens do VOLATILITY_DEFILLAMA_MAP — DeFiLlama /chart, 1 por vez (sem rate limit)
+    const coinsToFetch = Object.entries(VOLATILITY_DEFILLAMA_MAP).map(([sym, llamaId]) => ({ sym, llamaId }));
     const start = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
     for (const { sym, llamaId } of coinsToFetch) {
       try {
@@ -149,10 +140,12 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
         const vol = calcHistoricalVolatility(prices);
         if (!vol) continue;
         // Guarda pelo coin ID de CoinGecko (usado em VOLATILITY_COIN_MAP retrocompat)
-        const cgId = llamaId.replace("coingecko:", "");
+        const cgId = llamaId.startsWith("coingecko:") ? llamaId.replace("coingecko:", "") : llamaId;
         result[cgId] = vol;
         result[llamaId] = vol;
-        await new Promise(res => setTimeout(res, 600)); // 600ms entre calls
+        // Guarda também pelo símbolo do token (ex: "AAVE", "CRV") para lookup direto
+        result[sym] = vol;
+        await new Promise(res => setTimeout(res, 400)); // 400ms entre calls
       } catch {/* noop — tenta próximo */}
     }
     // Se DeFiLlama falhou tudo, fallback CoinGecko sequencial
@@ -403,6 +396,7 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
 
   const rpcByChain = {
     Base:     [BASE_RPC_PUB, BASE_RPC, BASE_RPC_ALT],
+    Ethereum: [ETH_RPC_PUB, ETH_RPC],
     Arbitrum: [ARBITRUM_RPC_PUB, ARBITRUM_RPC, ARBITRUM_RPC_ALT],
     Polygon:  [POLYGON_RPC, POLYGON_RPC_ALT],
   };
@@ -444,13 +438,15 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
       }
     }
 
-    // Discover unknown tokens from last ~14 400 blocks (≈ 48 h on Base / Arbitrum)
+    // Discover unknown tokens from last ~14400 blocks (≈48h on Base/Arbitrum; ≈2 days on Ethereum at ~12s/block = 14400 blocks)
     for (const [chainName, rpcs] of Object.entries(rpcByChain)) {
       try {
         const latestHex = await rpcCallWithFallback(rpcs, "eth_blockNumber", []);
         if (!latestHex) continue;
         const latestBlock = Number(BigInt(latestHex));
-        const fromBlock   = Math.max(0, latestBlock - 14400);
+        // Ethereum mainnet: ~7200 blocks/day; Base/Arbitrum: ~43200 blocks/day
+        const lookback = chainName === "Ethereum" ? 7200 : 14400;
+        const fromBlock   = Math.max(0, latestBlock - lookback);
         const logs = await rpcCallWithFallback(rpcs, "eth_getLogs", [{
           fromBlock: "0x" + fromBlock.toString(16),
           topics:    [transferSig, null, paddedAddr],

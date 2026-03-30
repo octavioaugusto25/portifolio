@@ -97,6 +97,14 @@ export const WALLET_TRACKED_ASSETS = [
   { chain: "Base", symbol: "BRETT", coinId: null,               llamaKey: "base:0x532f27101965dd16442e59d40670faf5ebb142e4",                   address: "0x532f27101965dd16442e59d40670faf5ebb142e4",              decimals: 18 },
   { chain: "Base", symbol: "WELL",  coinId: null,               llamaKey: "base:0xa88594d539cb17293cfd17359bc0da463c4f1f9e",                   address: "0xa88594d539cb17293cfd17359bc0da463c4f1f9e",              decimals: 18 },
 
+  // ── Ethereum Mainnet ──────────────────────────────────────────────────────
+  { chain: "Ethereum", symbol: "ETH",   coinId: "ethereum",         llamaKey: null,                                                              address: null,                                                       decimals: 18 },
+  { chain: "Ethereum", symbol: "WETH",  coinId: "ethereum",         llamaKey: "ethereum:0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",            address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",              decimals: 18 },
+  { chain: "Ethereum", symbol: "USDC",  coinId: null,               llamaKey: "ethereum:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",            address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",              decimals: 6  },
+  { chain: "Ethereum", symbol: "USDT",  coinId: null,               llamaKey: "ethereum:0xdac17f958d2ee523a2206206994597c13d831ec7",            address: "0xdac17f958d2ee523a2206206994597c13d831ec7",              decimals: 6  },
+  { chain: "Ethereum", symbol: "DAI",   coinId: null,               llamaKey: "ethereum:0x6b175474e89094c44da98b954eedeac495271d0f",            address: "0x6b175474e89094c44da98b954eedeac495271d0f",              decimals: 18 },
+  { chain: "Ethereum", symbol: "WBTC",  coinId: "bitcoin",          llamaKey: "ethereum:0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",            address: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",              decimals: 8  },
+
   // ── Arbitrum ──────────────────────────────────────────────────────────────
   { chain: "Arbitrum", symbol: "ETH",    coinId: "ethereum",    llamaKey: null,                                                                address: null,                                                       decimals: 18 },
   { chain: "Arbitrum", symbol: "USDC",   coinId: null,          llamaKey: "arbitrum:0xaf88d065e77c8cc2239327c5edb3a432268e5831",               address: "0xaf88d065e77c8cc2239327c5edb3a432268e5831",              decimals: 6  },
