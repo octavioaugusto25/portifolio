@@ -154,11 +154,16 @@ export function PoolAnalysisPanel({ pool, volData = {}, prices, fetchExternal, o
   // ── Resolve current price ──
   const tokens    = extractTokens(sym);
   const volTokens = tokens.filter(t => !isStable(t) && VOLATILITY_COIN_MAP[t]);
-  const poolVol   = volTokens.length > 0
+  const resolveVol = (key) => {
+    const v = volData[key];
+    if (!v) return null;
+    return typeof v === "number" ? v : v?.annualVol ?? null;
+  };
+  const poolVol = volTokens.length > 0
     ? volTokens.map(t => {
         const id = VOLATILITY_COIN_MAP[t];
-        return volData[id]?.annualVol ?? volData[id] ?? volData[t]?.annualVol ?? volData[t];
-      }).filter(Boolean).reduce((a, b, _, arr) => a + b / arr.length, 0)
+        return resolveVol(id) ?? resolveVol(t) ?? resolveVol(t.toLowerCase());
+      }).filter(Boolean).reduce((a, b, _, arr) => a + b / arr.length, 0) || null
     : null;
   const volLabel  = getVolLabel(poolVol);
 
