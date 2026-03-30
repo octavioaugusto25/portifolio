@@ -23,6 +23,9 @@ export const POLYGON_RPC      = "https://polygon.llamarpc.com";
 export const POLYGON_RPC_ALT  = "https://polygon-rpc.com";
 export const ARBITRUM_RPC     = "https://arbitrum.llamarpc.com";
 export const ARBITRUM_RPC_ALT = "https://arb1.arbitrum.io/rpc";
+export const BASE_RPC_PUB     = "https://base-rpc.publicnode.com";
+export const ETH_RPC_PUB      = "https://ethereum-rpc.publicnode.com";
+export const ARBITRUM_RPC_PUB = "https://arbitrum-one-rpc.publicnode.com";
 
 // ─── DEBANK (optional pro) ────────────────────────────────────────────────────
 export const DEBANK_PRO_API = "https://pro-openapi.debank.com/v1";

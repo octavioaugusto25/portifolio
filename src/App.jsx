@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AAVE_API, ARBITRUM_RPC, ARBITRUM_RPC_ALT, BALANCER_API,
-  BASE_RPC, BASE_RPC_ALT, BASE_UNISWAP_V3_NPM, BASE_UNISWAP_V4_POSITIONS_NFT,
+  BASE_RPC, BASE_RPC_ALT,
+  // ★ novos fallbacks que funcionam em IP de servidor
+  BASE_RPC_PUB, ETH_RPC_PUB, ARBITRUM_RPC_PUB,
+  BASE_UNISWAP_V3_NPM, BASE_UNISWAP_V4_POSITIONS_NFT,
   CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API,
-  DEFILLAMA_CHART,          // ★ NEW — chart history API
-  DEFILLAMA_COINS, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API,
-  ETH_RPC, POLYGON_RPC, POLYGON_RPC_ALT, PROTOCOL_COIN_MAP,
+  DEFILLAMA_CHART, DEFILLAMA_COINS, DEFILLAMA_YIELDS,
+  DEFISAFETY_API, DUNE_API, ETH_RPC,
+  POLYGON_RPC, POLYGON_RPC_ALT, PROTOCOL_COIN_MAP,
   TOKEN_DECIMALS_BY_ADDRESS, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_V3_NPM,
-  VOLATILITY_DEFILLAMA_MAP, // ★ NEW — DeFiLlama coin IDs for vol chart
+  VOLATILITY_DEFILLAMA_MAP,
   WALLET_TRACKED_ASSETS,
 } from "./constants";
 
@@ -86,100 +89,122 @@ export default function App() {
   },[fetchExternal]);
 
   // ── Fetch FDV ──
-  const fetchFdv = useCallback(async()=>{
-    setDataStatus(s=>({...s,fdv:"loading"}));
-    try{
-      const ids=Object.values(PROTOCOL_COIN_MAP).join(",");
-      const r=await fetchExternal(`${COINGECKO}/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=50`);
-      const coins=await r.json();
-      const map={};
-      coins.forEach(c=>{ map[c.id]={fdv:c.fully_diluted_valuation,marketCap:c.market_cap,price:c.current_price}; });
+const fdvCacheRef = React.useRef({ ts: 0, data: {} });
+  const fetchFdv = useCallback(async () => {
+    const now = Date.now();
+    if (now - fdvCacheRef.current.ts < 10 * 60 * 1000 && Object.keys(fdvCacheRef.current.data).length) {
+      setFdvMap(fdvCacheRef.current.data);
+      setDataStatus(s => ({ ...s, fdv: "ok" }));
+      return;
+    }
+    setDataStatus(s => ({ ...s, fdv: "loading" }));
+    try {
+      // Reduzido para os 8 tokens mais relevantes — menos chance de 429
+      const coreIds = ["uniswap","aave","curve-dao-token","pendle","lido-dao","morpho","aerodrome-finance","gmx"];
+      const r = await fetchExternal(
+        `${COINGECKO}/coins/markets?vs_currency=usd&ids=${coreIds.join(",")}&order=market_cap_desc&per_page=20`
+      );
+      if (!r.ok) throw new Error(`FDV ${r.status}`);
+      const coins = await r.json();
+      const map = {};
+      coins.forEach(c => { map[c.id] = { fdv: c.fully_diluted_valuation, marketCap: c.market_cap, price: c.current_price }; });
+      fdvCacheRef.current = { ts: now, data: map };
       setFdvMap(map);
-      setDataStatus(s=>({...s,fdv:"ok"}));
-    }catch{ setDataStatus(s=>({...s,fdv:"error"})); }
-  },[fetchExternal]);
-
-  // ── 7. Fetch Volatility (CoinGecko 30d price history) ──
-const fetchVolatility = useCallback(async () => {
+      setDataStatus(s => ({ ...s, fdv: "ok" }));
+    } catch {
+      setDataStatus(s => ({ ...s, fdv: "error" }));
+    }
+  }, [fetchExternal]);
+ 
+  // ── Fetch Volatility — DeFiLlama /chart, 1 coin por vez, só 3 principais ──
+  // DeFiLlama /chart só aceita UM coin no path. Batch não funciona (400).
+  const volCacheRef = React.useRef({ ts: 0, data: {} });
+  const fetchVolatility = useCallback(async () => {
+    // Cache de 30 min — vol histórica não muda em minutos
+    const now = Date.now();
+    if (now - volCacheRef.current.ts < 30 * 60 * 1000 && Object.keys(volCacheRef.current.data).length) {
+      setVolData(volCacheRef.current.data);
+      setVolLoading(false);
+      setDataStatus(s => ({ ...s, vol: "ok" }));
+      return;
+    }
     setVolLoading(true);
     setDataStatus(s => ({ ...s, vol: "loading" }));
- 
     const result = {};
- 
-    // ── Primary: DeFiLlama /chart — batch request, all tokens, no key needed
-    // Response: { coins: { "coingecko:ethereum": { prices: [[ts, price], ...] } } }
-    try {
-      const coinIds = [...new Set(Object.values(VOLATILITY_DEFILLAMA_MAP))].join(",");
-      const start   = Math.floor(Date.now() / 1000) - 30 * 24 * 3600; // 30 days ago
-      const r = await fetchExternal(
-        `${DEFILLAMA_CHART}/${coinIds}?start=${start}&span=30&period=1d`
-      );
-      if (!r.ok) throw new Error(`DeFiLlama chart ${r.status}`);
-      const d = await r.json();
- 
-      for (const [llamaId, coin] of Object.entries(d.coins || {})) {
-        const prices = (coin.prices || []).map(p => p[1]);
-        if (prices.length < 5) continue;
-        const vol = calcHistoricalVolatility(prices);
-        if (!vol) continue;
- 
-        // Store by full llamaId ("coingecko:ethereum")
-        result[llamaId] = vol;
-        // Also store by bare CoinGecko ID ("ethereum") for backward-compat
-        // with VOLATILITY_COIN_MAP used in PoolRow / PoolModal
-        if (llamaId.startsWith("coingecko:")) {
-          result[llamaId.replace("coingecko:", "")] = vol;
-        }
-      }
-      // If DeFiLlama returned at least some data, mark vol source as ok
-      if (Object.keys(result).length > 0) {
-        setVolData(result);
-        setVolLoading(false);
-        setDataStatus(s => ({ ...s, vol: "ok" }));
-        return;
-      }
-      throw new Error("DeFiLlama returned empty coins object");
-    } catch (err) {
-      console.warn("[Vol] DeFiLlama chart failed, falling back to CoinGecko:", err.message);
-    }
- 
-    // ── Fallback: CoinGecko (sequential with delay to avoid 429)
-    const fallbackCoins = ["bitcoin", "ethereum", "solana"];
-    for (const coinId of fallbackCoins) {
+    // Só os 3 principais no boot — DeFiLlama /chart, 1 por vez
+    const coinsToFetch = [
+      { sym: "ETH",  llamaId: "coingecko:ethereum" },
+      { sym: "BTC",  llamaId: "coingecko:bitcoin"  },
+      { sym: "SOL",  llamaId: "coingecko:solana"   },
+    ];
+    const start = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
+    for (const { sym, llamaId } of coinsToFetch) {
       try {
         const r = await fetchExternal(
-          `${COINGECKO}/coins/${coinId}/market_chart?vs_currency=usd&days=30&interval=daily`
+          `${DEFILLAMA_CHART}/${llamaId}?start=${start}&span=30&period=1d`
         );
-        if (!r.ok) continue;
-        const d    = await r.json();
-        const pArr = (d.prices || []).map(p => p[1]);
-        const vol  = calcHistoricalVolatility(pArr);
-        if (vol) result[coinId] = vol;
-        await new Promise(res => setTimeout(res, 1300));
-      } catch {/* noop */}
+        if (!r.ok) throw new Error(`${r.status}`);
+        const d = await r.json();
+        // Response: { coins: { "coingecko:ethereum": { prices: [[ts,price], ...] } } }
+        const coinData = d.coins?.[llamaId];
+        if (!coinData?.prices?.length) continue;
+        const prices = coinData.prices.map(p => p[1]);
+        const vol = calcHistoricalVolatility(prices);
+        if (!vol) continue;
+        // Guarda pelo coin ID de CoinGecko (usado em VOLATILITY_COIN_MAP retrocompat)
+        const cgId = llamaId.replace("coingecko:", "");
+        result[cgId] = vol;
+        result[llamaId] = vol;
+        await new Promise(res => setTimeout(res, 600)); // 600ms entre calls
+      } catch {/* noop — tenta próximo */}
     }
- 
+    // Se DeFiLlama falhou tudo, fallback CoinGecko sequencial
+    if (!Object.keys(result).length) {
+      for (const coinId of ["bitcoin", "ethereum", "solana"]) {
+        try {
+          const r = await fetchExternal(
+            `${COINGECKO}/coins/${coinId}/market_chart?vs_currency=usd&days=30&interval=daily`
+          );
+          if (!r.ok) continue;
+          const d = await r.json();
+          const vol = calcHistoricalVolatility((d.prices || []).map(p => p[1]));
+          if (vol) result[coinId] = vol;
+          await new Promise(res => setTimeout(res, 1500));
+        } catch {/* noop */}
+      }
+    }
+    volCacheRef.current = { ts: Date.now(), data: result };
     setVolData(result);
     setVolLoading(false);
     setDataStatus(s => ({ ...s, vol: Object.keys(result).length > 0 ? "ok" : "error" }));
   }, [fetchExternal]);
-
+ 
   const fetchExtendedSources = useCallback(async () => {
     setDataStatus(s => ({
-      ...s,
-      uniswap: "ok",
-      curve: "ok",
-      balancer: "ok",
-      aave: "ok",
-      compound: "ok",
-      dune: "ok",
-      certik: "ok",
-      defisafety: "ok",
+      ...s, uniswap:"ok", curve:"ok", balancer:"ok",
+      aave:"ok", compound:"ok", dune:"ok", certik:"ok", defisafety:"ok",
     }));
   }, []);
-
-  useEffect(()=>{ fetchPrices(); fetchPools(); fetchFdv(); fetchVolatility(); fetchExtendedSources(); },[]);
-  useEffect(()=>{ const t=setInterval(fetchPrices,60000); return()=>clearInterval(t); },[]);
+ 
+  // ── Boot: ESCALONADO para não sobrecarregar o proxy ──
+  // Tier 1 (imediato): dados críticos para renderizar UI
+  // Tier 2 (+3s):      FDV (menos urgente)
+  // Tier 3 (+6s):      Volatilidade (pode esperar, usa cache de 30min)
+  useEffect(() => {
+    fetchPrices();
+    fetchPools();
+    fetchExtendedSources();
+    const t2 = setTimeout(() => fetchFdv(),         3_000);
+    const t3 = setTimeout(() => fetchVolatility(),  6_000);
+    return () => { clearTimeout(t2); clearTimeout(t3); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+ 
+  useEffect(() => {
+    const t = setInterval(fetchPrices, 60_000);
+    return () => clearInterval(t);
+  }, []);
+ 
 
   // ── Enrich pools with Uniswap + FDV ──
   const allPools = useMemo(()=>{
@@ -229,8 +254,8 @@ const fetchVolatility = useCallback(async () => {
     };
     try {
       for (const network of [
-        { name: "Base", rpcs: [BASE_RPC, BASE_RPC_ALT], npm: BASE_UNISWAP_V3_NPM, project: "uniswap-base" },
-        { name: "Ethereum", rpcs: [ETH_RPC], npm: UNISWAP_V3_NPM, project: "uniswap" },
+        { name: "Base",     rpcs: [BASE_RPC_PUB, BASE_RPC, BASE_RPC_ALT],    npm: BASE_UNISWAP_V3_NPM, project: "uniswap-base" },
+      { name: "Ethereum", rpcs: [ETH_RPC_PUB, ETH_RPC],                    npm: UNISWAP_V3_NPM,      project: "uniswap"      },
       ]) {
         const balHex = await rpcCallWithFallback(network.rpcs, network.npm, `0x70a08231${addrArg}`);
         const bal = Number(BigInt(balHex || "0x0"));
@@ -277,7 +302,7 @@ const fetchVolatility = useCallback(async () => {
       return d?.result;
     };
     const rpcCallWithFallback = async (method, params) => {
-      for (const rpcUrl of [BASE_RPC, BASE_RPC_ALT]) {
+      for (const rpcUrl of [BASE_RPC_PUB, BASE_RPC, BASE_RPC_ALT]) {
         try {
           const result = await rpcCall(rpcUrl, method, params);
           if (result) return result;
@@ -380,8 +405,8 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
   setWalletLoading(true);
  
   const rpcByChain = {
-    Base:     [BASE_RPC, BASE_RPC_ALT],
-    Arbitrum: [ARBITRUM_RPC, ARBITRUM_RPC_ALT],
+    Base:     [BASE_RPC_PUB, BASE_RPC, BASE_RPC_ALT],
+    Arbitrum: [ARBITRUM_RPC_PUB, ARBITRUM_RPC, ARBITRUM_RPC_ALT],
     Polygon:  [POLYGON_RPC, POLYGON_RPC_ALT],
   };
  
