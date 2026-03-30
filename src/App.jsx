@@ -748,7 +748,20 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
           </div>
         )}
 
-        {tab==="portfolio"  && <PortfolioTab pools={allPools} volData={volData} walletPools={walletPools} walletLoading={walletLoading} onFetchWalletPools={fetchWalletActivePools} onFetchWalletPoolTx={fetchWalletPoolFromBaseTx} onFetchWalletAssets={fetchWalletAssets} onSuggestRebuild={(pool)=>suggestRebuildStrategy(pool, volData)}/>}
+        {tab === "portfolio" && (
+          <PortfolioTab
+            pools={allPools}
+            volData={volData}
+            walletPools={walletPools}
+            walletLoading={walletLoading}
+            onFetchWalletPools={fetchWalletActivePools}
+            onFetchWalletPoolTx={fetchWalletPoolFromBaseTx}
+            onFetchWalletAssets={fetchWalletAssets}
+            onSuggestRebuild={(pool) => suggestRebuildStrategy(pool, volData)}
+            fetchExternal={fetchExternal}   // ★ NEW
+            prices={prices}                 // ★ NEW
+          />
+        )}
         {tab==="volatility" && <VolatilityTab volData={volData} volLoading={volLoading} prices={prices} fetchExternal={fetchExternal}/>}
         {tab==="ai"         && <AIAdvisorTab pools={allPools} prices={prices} initialPool={advisorPool} key={advisorPool?.pool} fetchExternal={fetchExternal}/>}
         {tab==="liquidez"   && <LiquidezTab   pools={allPools} fdvData={fdvMap} dataStatus={dataStatus}/>}

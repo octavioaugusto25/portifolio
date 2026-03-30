@@ -3,9 +3,14 @@ import { VOLATILITY_COIN_MAP } from "../constants";
 import { calcChainConcentration, calcDiversificationScore, calcPortfolioScore, calcRiskConcentration, extractTokens, fmt, getPair, getRisk, getStrategy, getVolLabel, isStable } from "../utils";
 import { Badge, Card, SecTitle } from "../components/primitives";
 import { readPersisted, writePersisted } from "../persist";
+import { PoolAnalysisPanel } from "../components/PoolAnalysisPanel";
 
 // ─── 11. PORTFOLIO TAB ────────────────────────────────────────────────────────
-export function PortfolioTab({pools, volData, walletPools = [], walletLoading = false, onFetchWalletPools, onFetchWalletPoolTx, onFetchWalletAssets, onSuggestRebuild}) {
+export function PortfolioTab({
+  pools, volData, walletPools = [], walletLoading = false,
+  onFetchWalletPools, onFetchWalletPoolTx, onFetchWalletAssets, onSuggestRebuild,
+  fetchExternal, prices,           // ★ NEW
+}) {
   const STORAGE_KEY = "portfolio-positions-v3";
   const [positions, setPositions] = useState([]);
   const [showAdd,   setShowAdd]   = useState(false);
@@ -22,6 +27,7 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
   const [txHash, setTxHash] = useState("0x4353b87721b13688efde117ccbdbe5b2dbcf42bcd369af4bff1a511b35275711");
   const [rebuildAdvice, setRebuildAdvice] = useState(null);
   const [selectedWalletPool, setSelectedWalletPool] = useState(null);
+  const [analysisPool, setAnalysisPool] = useState(null);
 
   const importWalletAssets = async () => {
     const imported = await onFetchWalletAssets?.(walletAddress);
@@ -171,18 +177,20 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
                 </div>
               );
             })}
-            {selectedWalletPool&&(
-              <div style={{padding:"12px",background:"rgba(99,102,241,0.04)",border:"1px solid rgba(99,102,241,0.15)",borderRadius:"9px",marginTop:"6px",fontSize:"11px",color:"#64748b",lineHeight:1.8}}>
-                <div style={{fontWeight:700,color:"#a5b4fc",marginBottom:"6px"}}>{selectedWalletPool.symbol} — Análise</div>
-                {selectedPair&&<div>Par: <span style={{color:selectedPair.color}}>{selectedPair.icon} {selectedPair.label} · {selectedPair.il}</span></div>}
-                {selectedStrategy&&<div>Estratégia: <span style={{color:selectedStrategy.color}}>{selectedStrategy.icon} {selectedStrategy.type}</span></div>}
-                {selectedRisk&&<div>Risco: <span style={{color:selectedRisk.color}}>{selectedRisk.icon} {selectedRisk.label}</span></div>}
-                {rebuildAdvice&&<div style={{marginTop:"8px",padding:"8px",background:"rgba(0,0,0,0.2)",borderRadius:"6px",fontSize:"10px"}}>
-                  <div style={{fontWeight:700,color:"#f59e0b",marginBottom:"3px"}}>{rebuildAdvice.title}</div>
-                  <div style={{color:"#64748b"}}>{rebuildAdvice.action}</div>
-                  <div style={{color:"#334155",fontSize:"9px",marginTop:"3px"}}>Cadência: {rebuildAdvice.cadence}</div>
-                </div>}
-                <button onClick={()=>{const advice=onSuggestRebuild?.(selectedWalletPool.matchedPool||selectedWalletPool);setRebuildAdvice(advice);}} style={{marginTop:"8px",padding:"5px 12px",borderRadius:"6px",fontSize:"9px",background:"rgba(99,102,241,0.12)",border:"1px solid rgba(99,102,241,0.25)",color:"#a5b4fc",cursor:"pointer",fontFamily:"monospace"}}>🔄 Sugerir remontagem</button>
+            {selectedWalletPool && (
+              <div style={{ marginTop: "10px" }}>
+                <PoolAnalysisPanel
+                  pool={{
+                    ...selectedWalletPool,
+                    entryPrice: null,
+                    rangeMin: null,
+                    rangeMax: null,
+                  }}
+                  volData={volData}
+                  prices={prices}
+                  fetchExternal={fetchExternal}
+                  onClose={() => setSelectedWalletPool(null)}
+                />
               </div>
             )}
           </div>
@@ -384,6 +392,17 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
                     </div>
                     <div style={{textAlign:"center",fontSize:"9px",color:risk2.color,fontWeight:600}}>{risk2.icon}</div>
                     <button onClick={e=>{e.stopPropagation();removePosition(pos.id);}} style={{background:"none",border:"none",color:"#1e2d3d",cursor:"pointer",fontSize:"12px",padding:"2px"}}>✕</button>
+                    <button
+                      onClick={e => { e.stopPropagation(); setAnalysisPool(pos); setExpandedId(null); }}
+                      style={{
+                        background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)",
+                        color: "#a5b4fc", cursor: "pointer", fontSize: "9px", padding: "2px 6px",
+                        borderRadius: "5px", fontFamily: "monospace", whiteSpace: "nowrap",
+                      }}
+                      title="Abrir análise completa"
+                    >
+                      🔍
+                  </button>
                   </div>
 
                   {/* Expanded detail panel */}
@@ -515,6 +534,26 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
           </>
         )}
       </Card>
+
+
+      {analysisPool && (
+  <div style={{ marginTop: "4px" }}>
+    <PoolAnalysisPanel
+      pool={{
+        // pass saved position fields through
+        ...analysisPool,
+        matchedPool: pools.find(p =>
+          p.symbol?.toLowerCase().replace(/_/g,"/").includes(analysisPool.symbol?.toLowerCase()) ||
+          analysisPool.symbol?.toLowerCase().includes(p.project?.toLowerCase())
+        ) || null,
+      }}
+      volData={volData}
+      prices={prices}
+      fetchExternal={fetchExternal}
+      onClose={() => setAnalysisPool(null)}
+    />
+  </div>
+)}
     </div>
   );
 }
