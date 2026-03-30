@@ -6,11 +6,17 @@ import { readPersisted, writePersisted } from "../persist";
 
 // ─── 11. PORTFOLIO TAB ────────────────────────────────────────────────────────
 export function PortfolioTab({pools, volData, walletPools = [], walletLoading = false, onFetchWalletPools, onFetchWalletPoolTx, onFetchWalletAssets, onSuggestRebuild}) {
-  const STORAGE_KEY = "portfolio-positions-v2";
+  const STORAGE_KEY = "portfolio-positions-v3";
   const [positions, setPositions] = useState([]);
   const [showAdd,   setShowAdd]   = useState(false);
   const [saved,     setSaved]     = useState(false);
-  const [newPos,    setNewPos]    = useState({symbol:"",protocol:"",chain:"Ethereum",valueUSD:"",entryPrice:"",entryDate:new Date().toISOString().slice(0,10)});
+  const [expandedId, setExpandedId] = useState(null);
+  const [newPos,    setNewPos]    = useState({
+    symbol:"", protocol:"", chain:"Ethereum",
+    valueUSD:"", entryPrice:"", entryDate: new Date().toISOString().slice(0,10),
+    // ── new fields ──
+    tokenContract:"", quantity:"", avgCostUSD:"", notes:""
+  });
   const [poolSearch,setPoolSearch]= useState("");
   const [walletAddress, setWalletAddress] = useState("");
   const [txHash, setTxHash] = useState("0x4353b87721b13688efde117ccbdbe5b2dbcf42bcd369af4bff1a511b35275711");
@@ -33,6 +39,7 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
       _score: asset._score || asset.matchedPool?._score || 50,
       _liqScore: asset._liqScore || asset.matchedPool?._liqScore || 0,
       apy: asset.apy || asset.matchedPool?.apy || 0,
+      tokenContract:"", quantity:"", avgCostUSD:"", notes:""
     }));
     const manualPositions = positions.filter(p => !String(p.id).startsWith("wallet-"));
     const updated = [...manualPositions, ...importedPositions];
@@ -45,6 +52,15 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
       try{
         const raw = await readPersisted(STORAGE_KEY);
         if(raw){ setPositions(JSON.parse(raw)||[]); }
+        else {
+          // migrate from v2
+          const oldRaw = await readPersisted("portfolio-positions-v2");
+          if(oldRaw){
+            const old = JSON.parse(oldRaw)||[];
+            const migrated = old.map(p=>({...p, tokenContract:"", quantity:"", avgCostUSD:"", notes:""}));
+            setPositions(migrated);
+          }
+        }
       }catch{/* noop */}
     })();
   },[]);
@@ -56,12 +72,13 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
 
   const addPosition = () => {
     if(!newPos.symbol||!newPos.valueUSD) return;
-    // try to find matching pool for score
     const matchPool = pools.find(p=>p.symbol?.toLowerCase().replace(/_/g,"/").includes(newPos.symbol.toLowerCase())||newPos.symbol.toLowerCase().includes(p.project?.toLowerCase()));
     const enriched = {
       id: Date.now(), ...newPos,
       valueUSD: Number(newPos.valueUSD),
       entryPrice: Number(newPos.entryPrice)||0,
+      quantity: Number(newPos.quantity)||0,
+      avgCostUSD: Number(newPos.avgCostUSD)||0,
       _score: matchPool?._score||50,
       _liqScore: matchPool?._liqScore||0,
       apy: matchPool?.apy||0,
@@ -69,12 +86,18 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
     const updated = [...positions, enriched];
     setPositions(updated);
     save(updated);
-    setNewPos({symbol:"",protocol:"",chain:"Ethereum",valueUSD:"",entryPrice:"",entryDate:new Date().toISOString().slice(0,10)});
+    setNewPos({symbol:"",protocol:"",chain:"Ethereum",valueUSD:"",entryPrice:"",entryDate:new Date().toISOString().slice(0,10),tokenContract:"",quantity:"",avgCostUSD:"",notes:""});
     setShowAdd(false);
   };
 
   const removePosition = (id) => {
     const updated = positions.filter(p=>p.id!==id);
+    setPositions(updated);
+    save(updated);
+  };
+
+  const updatePosition = (id, field, value) => {
+    const updated = positions.map(p => p.id===id ? {...p, [field]: value} : p);
     setPositions(updated);
     save(updated);
   };
@@ -88,12 +111,24 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
   const portRisk      = getRisk(portScore);
   const weightedAPY   = positions.length>0&&totalValue>0 ? positions.reduce((a,p)=>a+(p.apy||0)*(p.valueUSD||0)/totalValue,0) : 0;
 
+  // total invested cost (sum of avgCostUSD * quantity or valueUSD as fallback)
+  const totalCost = positions.reduce((a,p)=> {
+    if(p.avgCostUSD && p.quantity) return a + p.avgCostUSD * p.quantity;
+    if(p.entryPrice && p.quantity) return a + p.entryPrice * p.quantity;
+    return a + (p.valueUSD||0);
+  }, 0);
+  const totalPnL = totalValue - totalCost;
+  const pnlPct   = totalCost > 0 ? (totalPnL / totalCost)*100 : 0;
+
   const filteredPools = pools.filter(p=>poolSearch?p.symbol?.toLowerCase().includes(poolSearch.toLowerCase())||p.project?.toLowerCase().includes(poolSearch.toLowerCase()):true).slice(0,6);
 
   const divColor = divScore>=70?"#22c55e":divScore>=40?"#f59e0b":"#ef4444";
   const selectedRisk = selectedWalletPool ? getRisk(selectedWalletPool._score || selectedWalletPool.matchedPool?._score || 0) : null;
   const selectedPair = selectedWalletPool ? getPair(selectedWalletPool.symbol) : null;
   const selectedStrategy = selectedWalletPool ? getStrategy(selectedWalletPool.matchedPool || selectedWalletPool) : null;
+
+  const inputStyle = {padding:"6px 8px",background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:"6px",color:"#f1f5f9",fontFamily:"monospace",fontSize:"11px",width:"100%"};
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:"14px"}}>
       <Card>
@@ -117,176 +152,113 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
           />
           <button disabled={walletLoading} onClick={()=>onFetchWalletPoolTx?.(txHash)} style={{padding:"8px 12px",borderRadius:"7px",fontSize:"10px",background:"rgba(34,197,94,0.12)",border:"1px solid rgba(34,197,94,0.3)",color:"#86efac",cursor:walletLoading?"not-allowed":"pointer",opacity:walletLoading?0.6:1,fontFamily:"monospace"}}>Buscar pela tx</button>
         </div>
-        {walletLoading&&<div style={{fontSize:"10px",color:"#475569"}}>Buscando posições on-chain...</div>}
-        {!walletLoading && walletPools.length>0 && (
-          <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
-            {walletPools.map(wp=>(
-              <div key={wp.id} onClick={()=>{setSelectedWalletPool(wp);setRebuildAdvice(onSuggestRebuild?.(wp.matchedPool||wp)||null);}} style={{padding:"8px",borderRadius:"7px",background:selectedWalletPool?.id===wp.id?"rgba(99,102,241,0.08)":"rgba(0,0,0,0.2)",display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"center",cursor:"pointer",border:selectedWalletPool?.id===wp.id?"1px solid rgba(99,102,241,0.25)":"1px solid transparent"}}>
-                <div>
-                  <div style={{fontSize:"11px",fontWeight:700,color:"#94a3b8"}}>{wp.symbol} <span style={{fontSize:"9px",color:"#334155"}}>fee {wp.feeTier}</span></div>
-                  <div style={{fontSize:"9px",color:"#334155"}}>Origem: {wp.source || "wallet"} · TVL ${fmt(wp.tvlUsd,0)} · Match local: {wp.matchedPool?`Score ${wp.matchedPool._score}`:"não encontrado"}</div>
-                  {wp.tokenId && <div style={{fontSize:"9px",color:"#475569"}}>NFT #{wp.tokenId} · {wp.protocol || "LP position"}</div>}
-                </div>
-                <button onClick={(e)=>{e.stopPropagation();setSelectedWalletPool(wp);setRebuildAdvice(onSuggestRebuild?.(wp.matchedPool||wp)||null);}} style={{padding:"5px 9px",borderRadius:"6px",fontSize:"9px",background:"rgba(34,197,94,0.12)",border:"1px solid rgba(34,197,94,0.3)",color:"#22c55e",cursor:"pointer"}}>Estratégia remontar</button>
-              </div>
-            ))}
-          </div>
-        )}
-        {!walletLoading && (walletAddress || txHash) && walletPools.length===0 && (
-          <div style={{fontSize:"10px",color:"#475569"}}>Nenhuma posição encontrada com essa carteira/tx.</div>
-        )}
-        <div style={{fontSize:"9px",color:"#475569",marginTop:"6px"}}>Importar ativos cruza Base, Polygon e Arbitrum com lista curada de tokens para ignorar spam.</div>
-        {rebuildAdvice && (
-          <div style={{marginTop:"10px",padding:"10px",background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.2)",borderRadius:"8px"}}>
-            <div style={{fontSize:"10px",fontWeight:700,color:"#a5b4fc",marginBottom:"3px"}}>{rebuildAdvice.title}</div>
-            <div style={{fontSize:"10px",color:"#94a3b8",lineHeight:1.6}}>{rebuildAdvice.action}</div>
-            <div style={{fontSize:"9px",color:"#64748b",marginTop:"4px"}}>Cadência sugerida: {rebuildAdvice.cadence}</div>
-          </div>
-        )}
-        {selectedWalletPool && (
-          <Card glow="#6366f1" style={{marginTop:"10px",padding:"14px"}}>
-            <SecTitle icon="🧠" sub="Clique em outra posição para comparar">Detalhes da posição</SecTitle>
-            <div style={{display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"flex-start",marginBottom:"12px"}}>
-              <div>
-                <div style={{fontSize:"18px",fontWeight:800,color:"#f1f5f9"}}>{selectedWalletPool.symbol}</div>
-                <div style={{fontSize:"10px",color:"#64748b",marginTop:"4px"}}>{selectedWalletPool.protocol || selectedWalletPool.matchedPool?.project || "LP position"} · {selectedWalletPool.chain || selectedWalletPool.matchedPool?.chain || "Base"}</div>
-              </div>
-              <div style={{display:"flex",gap:"6px",flexWrap:"wrap",justifyContent:"flex-end"}}>
-                <Badge color={selectedRisk?.color || "#64748b"} sm>{selectedRisk?.label || "Sem score"}</Badge>
-                <Badge color={selectedPair?.color || "#64748b"} sm>{selectedPair?.label || "Par"}</Badge>
-                <Badge color={selectedStrategy?.color || "#64748b"} sm>{selectedStrategy?.type || "Estratégia"}</Badge>
-              </div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px",marginBottom:"12px"}}>
-              {[
-                {label:"Taxa", value:`${((selectedWalletPool.feeTier || 0)/10000).toFixed(2)}%`, color:"#a5b4fc"},
-                {label:"NFT", value:selectedWalletPool.tokenId ? `#${selectedWalletPool.tokenId}` : "—", color:"#f59e0b"},
-                {label:"APY local", value:selectedWalletPool.matchedPool ? `${fmt(selectedWalletPool.matchedPool.apy || 0,1)}%` : "—", color:"#22c55e"},
-                {label:"Score", value:`${selectedWalletPool.matchedPool?._score || selectedWalletPool._score || 0}/100`, color:selectedRisk?.color || "#64748b"},
-              ].map(item=>(
-                <div key={item.label} style={{padding:"10px",borderRadius:"10px",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.05)"}}>
-                  <div style={{fontSize:"9px",color:"#475569",marginBottom:"4px",letterSpacing:"1px"}}>{item.label}</div>
-                  <div style={{fontSize:"16px",fontWeight:800,color:item.color,fontFamily:"monospace"}}>{item.value}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:"10px"}}>
-              <div style={{padding:"10px",borderRadius:"10px",background:"rgba(0,0,0,0.18)",border:"1px solid rgba(255,255,255,0.04)"}}>
-                <div style={{fontSize:"10px",fontWeight:700,color:"#cbd5e1",marginBottom:"8px"}}>Aporte detectado</div>
-                {selectedWalletPool.positionValueEth && <div style={{fontSize:"10px",color:"#94a3b8",marginBottom:"4px"}}>ETH: {selectedWalletPool.positionValueEth}</div>}
-                {(selectedWalletPool.transfers || []).length > 0 ? (
-                  <div style={{display:"flex",flexDirection:"column",gap:"4px"}}>
-                    {selectedWalletPool.transfers.map(t=>(
-                      <div key={`${selectedWalletPool.id}-${t.address}`} style={{fontSize:"10px",color:"#94a3b8"}}>{t.symbol}: {t.formattedAmount}</div>
-                    ))}
+
+        {/* Wallet pools results */}
+        {walletPools.length>0&&(
+          <div style={{marginTop:"4px"}}>
+            <div style={{fontSize:"9px",color:"#2d3748",letterSpacing:"1px",fontFamily:"monospace",marginBottom:"6px"}}>POSIÇÕES ENCONTRADAS ON-CHAIN</div>
+            {walletPools.map((wp)=>{
+              const risk2 = selectedRisk && selectedWalletPool?.id===wp.id ? selectedRisk : getRisk(wp._score||wp.matchedPool?._score||0);
+              return (
+                <div key={wp.id} onClick={()=>setSelectedWalletPool(v=>v?.id===wp.id?null:wp)} style={{padding:"8px 12px",background:selectedWalletPool?.id===wp.id?"rgba(99,102,241,0.08)":"rgba(0,0,0,0.2)",borderRadius:"7px",marginBottom:"5px",cursor:"pointer",border:`1px solid ${selectedWalletPool?.id===wp.id?"rgba(99,102,241,0.22)":"rgba(255,255,255,0.04)"}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div><div style={{fontSize:"11px",fontWeight:600,color:"#94a3b8"}}>{wp.symbol}</div><div style={{fontSize:"9px",color:"#2d3748"}}>{wp.chain} · {wp.source}</div></div>
+                    <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
+                      {wp.feeTier&&<Badge color="#6366f1" sm>{wp.feeTier/10000}% fee</Badge>}
+                      {wp.matchedPool&&<Badge color={risk2.color} sm>Score {wp.matchedPool._score||"?"}</Badge>}
+                    </div>
                   </div>
-                ) : <div style={{fontSize:"10px",color:"#475569"}}>Sem transferências ERC-20 identificadas no receipt.</div>}
+                </div>
+              );
+            })}
+            {selectedWalletPool&&(
+              <div style={{padding:"12px",background:"rgba(99,102,241,0.04)",border:"1px solid rgba(99,102,241,0.15)",borderRadius:"9px",marginTop:"6px",fontSize:"11px",color:"#64748b",lineHeight:1.8}}>
+                <div style={{fontWeight:700,color:"#a5b4fc",marginBottom:"6px"}}>{selectedWalletPool.symbol} — Análise</div>
+                {selectedPair&&<div>Par: <span style={{color:selectedPair.color}}>{selectedPair.icon} {selectedPair.label} · {selectedPair.il}</span></div>}
+                {selectedStrategy&&<div>Estratégia: <span style={{color:selectedStrategy.color}}>{selectedStrategy.icon} {selectedStrategy.type}</span></div>}
+                {selectedRisk&&<div>Risco: <span style={{color:selectedRisk.color}}>{selectedRisk.icon} {selectedRisk.label}</span></div>}
+                {rebuildAdvice&&<div style={{marginTop:"8px",padding:"8px",background:"rgba(0,0,0,0.2)",borderRadius:"6px",fontSize:"10px"}}>
+                  <div style={{fontWeight:700,color:"#f59e0b",marginBottom:"3px"}}>{rebuildAdvice.title}</div>
+                  <div style={{color:"#64748b"}}>{rebuildAdvice.action}</div>
+                  <div style={{color:"#334155",fontSize:"9px",marginTop:"3px"}}>Cadência: {rebuildAdvice.cadence}</div>
+                </div>}
+                <button onClick={()=>{const advice=onSuggestRebuild?.(selectedWalletPool.matchedPool||selectedWalletPool);setRebuildAdvice(advice);}} style={{marginTop:"8px",padding:"5px 12px",borderRadius:"6px",fontSize:"9px",background:"rgba(99,102,241,0.12)",border:"1px solid rgba(99,102,241,0.25)",color:"#a5b4fc",cursor:"pointer",fontFamily:"monospace"}}>🔄 Sugerir remontagem</button>
               </div>
-              <div style={{padding:"10px",borderRadius:"10px",background:"rgba(0,0,0,0.18)",border:"1px solid rgba(255,255,255,0.04)"}}>
-                <div style={{fontSize:"10px",fontWeight:700,color:"#cbd5e1",marginBottom:"8px"}}>Operação</div>
-                <div style={{fontSize:"10px",color:"#94a3b8",lineHeight:1.7}}>Fee tier: {selectedWalletPool.feeTier} bps</div>
-                <div style={{fontSize:"10px",color:"#94a3b8",lineHeight:1.7}}>Fonte: {selectedWalletPool.source}</div>
-                <div style={{fontSize:"10px",color:"#94a3b8",lineHeight:1.7}}>Tx: {selectedWalletPool.txHash ? `${selectedWalletPool.txHash.slice(0,10)}...${selectedWalletPool.txHash.slice(-6)}` : "—"}</div>
-                <div style={{fontSize:"10px",color:"#94a3b8",lineHeight:1.7}}>NFT contract: {selectedWalletPool.nftContract ? `${selectedWalletPool.nftContract.slice(0,10)}...${selectedWalletPool.nftContract.slice(-6)}` : "—"}</div>
-              </div>
-            </div>
-          </Card>
+            )}
+          </div>
         )}
       </Card>
 
-      {/* Summary cards */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"10px"}}>
+      {/* ── Portfolio Analytics ── */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px"}}>
         {[
-          {label:"Capital Total",     value:totalValue>0?`$${fmt(totalValue,0)}`:"$0",      color:"#3b82f6",    icon:"💰"},
-          {label:"Score Médio",       value:`${portScore}/100`,                              color:portRisk.color,icon:"🧠"},
-          {label:"Diversificação",    value:`${divScore}/100`,                               color:divColor,      icon:"🌐"},
-          {label:"APY Médio Pond.",   value:totalValue>0?`${fmt(weightedAPY,1)}%`:"—",      color:"#22c55e",    icon:"📈"},
+          {label:"Portfólio Total",value:`$${fmt(totalValue,0)}`,color:"#3b82f6",sub:`${positions.length} posições`},
+          {label:"Score Médio",value:portScore,color:portRisk.color,sub:portRisk.label,icon:portRisk.icon},
+          {label:"Diversificação",value:`${divScore}%`,color:divColor,sub:divScore>=70?"Boa":"Concentrado"},
+          {label:"APY Ponderado",value:`${fmt(weightedAPY,1)}%`,color:"#22c55e",sub:"estimado"},
         ].map(m=>(
-          <Card key={m.label} glow={m.color} style={{padding:"14px"}}>
-            <div style={{fontSize:"14px",marginBottom:"4px"}}>{m.icon}</div>
-            <div style={{fontSize:"22px",fontWeight:800,color:m.color,fontFamily:"monospace"}}>{m.value}</div>
-            <div style={{fontSize:"9px",color:"#2d3748",marginTop:"4px",letterSpacing:"1px"}}>{m.label}</div>
-          </Card>
+          <div key={m.label} style={{padding:"12px",background:"rgba(0,0,0,0.2)",borderRadius:"9px",border:"1px solid rgba(255,255,255,0.04)"}}>
+            <div style={{fontSize:"8px",color:"#2d3748",letterSpacing:"1px",fontFamily:"monospace",marginBottom:"5px"}}>{m.label.toUpperCase()}</div>
+            <div style={{fontSize:"20px",fontWeight:700,color:m.color,fontFamily:"monospace"}}>{m.icon?`${m.icon} `:""}{m.value}</div>
+            <div style={{fontSize:"9px",color:"#334155",marginTop:"2px"}}>{m.sub}</div>
+          </div>
         ))}
       </div>
 
-      {positions.length>0&&(
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}}>
-
-          {/* Risk Concentration */}
-          <Card>
-            <SecTitle icon="🎯" sub="Distribuição do capital por nível de risco">Risk Concentration</SecTitle>
-            <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
-              {[
-                {label:"🟢 Baixo Risco (≥75)",   pct:riskConc.low,    color:"#22c55e"},
-                {label:"🟡 Risco Médio (55–74)", pct:riskConc.medium, color:"#f59e0b"},
-                {label:"🟠 Risco Alto (35–54)",  pct:riskConc.high,   color:"#f97316"},
-                {label:"🔴 Muito Arriscado (<35)",pct:riskConc.extreme,color:"#ef4444"},
-              ].map(r=>(
-                <div key={r.label}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:"3px",fontSize:"10px"}}>
-                    <span style={{color:"#64748b"}}>{r.label}</span>
-                    <span style={{color:r.color,fontFamily:"monospace",fontWeight:700}}>{r.pct.toFixed(1)}%</span>
-                  </div>
-                  <div style={{height:"5px",background:"rgba(255,255,255,0.04)",borderRadius:"3px",overflow:"hidden"}}>
-                    <div style={{height:"100%",width:`${r.pct}%`,background:r.color,borderRadius:"3px",transition:"width 0.6s ease"}}/>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {riskConc.extreme>30&&(
-              <div style={{marginTop:"10px",padding:"8px",background:"rgba(239,68,68,0.07)",border:"1px solid rgba(239,68,68,0.18)",borderRadius:"6px",fontSize:"9px",color:"#ef4444"}}>
-                ⚠ {riskConc.extreme.toFixed(0)}% do capital em pools de alto risco. Considere rebalancear.
-              </div>
-            )}
-          </Card>
-
-          {/* Chain & Diversification */}
-          <Card>
-            <SecTitle icon="🌐" sub="Concentração por rede">Chain Distribution</SecTitle>
-            <div style={{display:"flex",flexDirection:"column",gap:"6px",marginBottom:"14px"}}>
-              {Object.entries(chainConc).sort((a,b)=>b[1]-a[1]).map(([chain,pct])=>{
-                const chainColor = chain==="Ethereum"?"#627eea":chain==="Arbitrum"?"#2d9cdb":chain==="Base"?"#3b82f6":chain==="Solana"?"#9945ff":"#64748b";
-                return (
-                  <div key={chain}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:"2px",fontSize:"10px"}}>
-                      <span style={{color:"#64748b"}}>{chain}</span>
-                      <span style={{color:chainColor,fontFamily:"monospace",fontWeight:700}}>{pct.toFixed(1)}%</span>
-                    </div>
-                    <div style={{height:"4px",background:"rgba(255,255,255,0.04)",borderRadius:"2px",overflow:"hidden"}}>
-                      <div style={{height:"100%",width:`${pct}%`,background:chainColor,borderRadius:"2px"}}/>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{padding:"10px",background:divScore>=70?"rgba(34,197,94,0.06)":divScore>=40?"rgba(245,158,11,0.06)":"rgba(239,68,68,0.06)",border:`1px solid ${divColor}18`,borderRadius:"8px"}}>
-              <div style={{fontSize:"9px",color:"#2d3748",letterSpacing:"1px",marginBottom:"4px",fontFamily:"monospace"}}>DIVERSIFICATION SCORE</div>
-              <div style={{fontSize:"24px",fontWeight:800,color:divColor,fontFamily:"monospace"}}>{divScore}<span style={{fontSize:"12px",color:"#475569"}}>/100</span></div>
-              <div style={{fontSize:"9px",color:"#475569",marginTop:"3px"}}>{divScore>=70?"Bem diversificado. Continue balanceando.":divScore>=40?"Diversificação moderada. Adicione outras redes/pares.":"Muito concentrado. Distribua o capital entre mais pools/redes."}</div>
-            </div>
-          </Card>
+      {/* ── PnL Summary ── */}
+      {positions.some(p=>p.avgCostUSD||p.entryPrice)&&(
+        <div style={{padding:"12px 16px",background:totalPnL>=0?"rgba(34,197,94,0.06)":"rgba(239,68,68,0.06)",border:`1px solid ${totalPnL>=0?"rgba(34,197,94,0.15)":"rgba(239,68,68,0.15)"}`,borderRadius:"9px",display:"flex",gap:"24px",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:"8px",color:"#334155",letterSpacing:"1px",fontFamily:"monospace",marginBottom:"3px"}}>CUSTO TOTAL INVESTIDO</div>
+            <div style={{fontSize:"16px",fontWeight:700,color:"#94a3b8",fontFamily:"monospace"}}>${fmt(totalCost,0)}</div>
+          </div>
+          <div>
+            <div style={{fontSize:"8px",color:"#334155",letterSpacing:"1px",fontFamily:"monospace",marginBottom:"3px"}}>P&L ESTIMADO</div>
+            <div style={{fontSize:"20px",fontWeight:700,color:totalPnL>=0?"#22c55e":"#ef4444",fontFamily:"monospace"}}>{totalPnL>=0?"+":`-`}${fmt(Math.abs(totalPnL),0)}</div>
+          </div>
+          <div>
+            <div style={{fontSize:"8px",color:"#334155",letterSpacing:"1px",fontFamily:"monospace",marginBottom:"3px"}}>RETORNO</div>
+            <div style={{fontSize:"20px",fontWeight:700,color:totalPnL>=0?"#22c55e":"#ef4444",fontFamily:"monospace"}}>{pnlPct>=0?"+":""}{fmt(pnlPct,1)}%</div>
+          </div>
+          <div style={{fontSize:"9px",color:"#2d3748",lineHeight:1.6,marginLeft:"auto",maxWidth:"180px"}}>⚠ P&L aproximado. Baseado nos custos médios e valor atual informado. Não inclui fees recebidos.</div>
         </div>
       )}
 
-      {/* Positions list */}
+      {/* ── Risk concentration ── */}
+      {positions.length>0&&(
+        <Card style={{padding:"12px 16px"}}>
+          <div style={{fontSize:"9px",color:"#2d3748",letterSpacing:"1px",fontFamily:"monospace",marginBottom:"8px"}}>CONCENTRAÇÃO DE RISCO</div>
+          <div style={{display:"flex",height:"8px",borderRadius:"4px",overflow:"hidden",gap:"2px",marginBottom:"6px"}}>
+            {[{k:"low",c:"#22c55e"},{k:"medium",c:"#f59e0b"},{k:"high",c:"#f97316"},{k:"extreme",c:"#ef4444"}].map(({k,c})=>(
+              riskConc[k]>0&&<div key={k} style={{height:"100%",width:`${riskConc[k]}%`,background:c,transition:"width 0.4s"}}/>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:"12px",flexWrap:"wrap"}}>
+            {[{k:"low",label:"Baixo",c:"#22c55e"},{k:"medium",label:"Médio",c:"#f59e0b"},{k:"high",label:"Alto",c:"#f97316"},{k:"extreme",label:"Extremo",c:"#ef4444"}].map(({k,label,c})=>(
+              <span key={k} style={{fontSize:"9px",color:c,fontFamily:"monospace"}}>{label}: {riskConc[k].toFixed(0)}%</span>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* ── Positions ── */}
       <Card>
-        <SecTitle icon="💼" right={
+        <SecTitle icon="📋" right={
           <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
             {saved&&<span style={{fontSize:"9px",color:"#22c55e",fontFamily:"monospace"}}>✓ SALVO</span>}
-            <button onClick={()=>setShowAdd(!showAdd)} style={{padding:"4px 12px",borderRadius:"6px",fontSize:"9px",background:"rgba(99,102,241,0.12)",border:"1px solid rgba(99,102,241,0.28)",color:"#a5b4fc",cursor:"pointer",fontFamily:"monospace"}}>+ POSIÇÃO</button>
+            <button onClick={()=>setShowAdd(v=>!v)} style={{padding:"5px 12px",borderRadius:"6px",fontSize:"9px",background:"rgba(99,102,241,0.12)",border:"1px solid rgba(99,102,241,0.28)",color:"#a5b4fc",cursor:"pointer",fontFamily:"monospace",letterSpacing:"1px"}}>+ POSIÇÃO</button>
           </div>
         }>Minhas Posições</SecTitle>
 
         {/* Add form */}
         {showAdd&&(
-          <div style={{padding:"14px",background:"rgba(99,102,241,0.06)",border:"1px solid rgba(99,102,241,0.18)",borderRadius:"10px",marginBottom:"14px"}}>
-            <div style={{fontSize:"9px",color:"#3d4f63",letterSpacing:"2px",fontFamily:"monospace",marginBottom:"10px"}}>NOVA POSIÇÃO</div>
+          <div style={{padding:"16px",background:"rgba(99,102,241,0.05)",border:"1px solid rgba(99,102,241,0.18)",borderRadius:"10px",marginBottom:"14px"}}>
+            <div style={{fontSize:"9px",color:"#3d4f63",letterSpacing:"2px",fontFamily:"monospace",marginBottom:"12px"}}>NOVA POSIÇÃO</div>
 
             {/* Pool search */}
-            <div style={{marginBottom:"8px"}}>
-              <div style={{fontSize:"9px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>BUSCAR POOL (opcional)</div>
-              <input value={poolSearch} onChange={e=>setPoolSearch(e.target.value)} placeholder="Ex: USDC/ETH, uniswap..." style={{width:"100%",padding:"6px 10px",background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:"6px",color:"#f1f5f9",fontFamily:"monospace",fontSize:"11px",marginBottom:"6px"}}/>
+            <div style={{marginBottom:"10px"}}>
+              <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>BUSCAR POOL (opcional)</div>
+              <input value={poolSearch} onChange={e=>setPoolSearch(e.target.value)} placeholder="Ex: USDC/ETH, uniswap..." style={{...inputStyle,marginBottom:"5px"}}/>
               {poolSearch&&(
                 <div style={{display:"flex",flexDirection:"column",gap:"3px",maxHeight:"120px",overflowY:"auto"}}>
                   {filteredPools.map(p=>(
@@ -299,30 +271,57 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
               )}
             </div>
 
+            {/* Row 1: symbol / protocol / chain */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px",marginBottom:"8px"}}>
               {[
-                {label:"PAR / SÍMBOLO",key:"symbol",   placeholder:"USDC/ETH"},
-                {label:"PROTOCOLO",    key:"protocol",  placeholder:"uniswap-v3"},
-                {label:"REDE",         key:"chain",     placeholder:"Ethereum"},
+                {label:"PAR / SÍMBOLO",   key:"symbol",   placeholder:"USDC/ETH"},
+                {label:"PROTOCOLO",        key:"protocol", placeholder:"uniswap-v3"},
+                {label:"REDE",             key:"chain",    placeholder:"Ethereum"},
               ].map(f=>(
                 <div key={f.key}>
                   <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>{f.label}</div>
-                  <input value={newPos[f.key]} onChange={e=>setNewPos(n=>({...n,[f.key]:e.target.value}))} placeholder={f.placeholder} style={{width:"100%",padding:"6px 8px",background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:"6px",color:"#f1f5f9",fontFamily:"monospace",fontSize:"11px"}}/>
+                  <input value={newPos[f.key]} onChange={e=>setNewPos(n=>({...n,[f.key]:e.target.value}))} placeholder={f.placeholder} style={inputStyle}/>
                 </div>
               ))}
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px",marginBottom:"10px"}}>
+
+            {/* Row 2: value / entry price / date */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px",marginBottom:"8px"}}>
               {[
-                {label:"VALOR (USD)",key:"valueUSD",   placeholder:"1000"},
-                {label:"PREÇO ENTRADA",key:"entryPrice",placeholder:"2000"},
-                {label:"DATA ENTRADA",key:"entryDate",  placeholder:"2025-01-01"},
+                {label:"VALOR ATUAL (USD)", key:"valueUSD",   placeholder:"1000"},
+                {label:"PREÇO ENTRADA ($)", key:"entryPrice", placeholder:"2000"},
+                {label:"DATA ENTRADA",       key:"entryDate",  placeholder:"2025-01-01"},
               ].map(f=>(
                 <div key={f.key}>
                   <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>{f.label}</div>
-                  <input value={newPos[f.key]} onChange={e=>setNewPos(n=>({...n,[f.key]:e.target.value}))} placeholder={f.placeholder} style={{width:"100%",padding:"6px 8px",background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:"6px",color:"#f1f5f9",fontFamily:"monospace",fontSize:"11px"}}/>
+                  <input value={newPos[f.key]} onChange={e=>setNewPos(n=>({...n,[f.key]:e.target.value}))} placeholder={f.placeholder} style={inputStyle}/>
                 </div>
               ))}
             </div>
+
+            {/* Row 3: token contract / quantity / avg cost */}
+            <div style={{borderTop:"1px solid rgba(255,255,255,0.05)",paddingTop:"10px",marginBottom:"8px"}}>
+              <div style={{fontSize:"8px",color:"#6366f1",letterSpacing:"1px",fontFamily:"monospace",marginBottom:"8px"}}>📄 DETALHES DO TOKEN (opcional)</div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:"8px",marginBottom:"8px"}}>
+                <div>
+                  <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>CONTRATO DO TOKEN</div>
+                  <input value={newPos.tokenContract} onChange={e=>setNewPos(n=>({...n,tokenContract:e.target.value.trim()}))} placeholder="0x... (endereço do contrato)" style={inputStyle}/>
+                </div>
+                <div>
+                  <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>QUANTIDADE</div>
+                  <input value={newPos.quantity} onChange={e=>setNewPos(n=>({...n,quantity:e.target.value.replace(/[^0-9.]/g,"")}))} placeholder="Ex: 1500.5" style={inputStyle}/>
+                </div>
+                <div>
+                  <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>CUSTO MÉDIO ($)</div>
+                  <input value={newPos.avgCostUSD} onChange={e=>setNewPos(n=>({...n,avgCostUSD:e.target.value.replace(/[^0-9.]/g,"")}))} placeholder="$ por token" style={inputStyle}/>
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>NOTAS</div>
+                <input value={newPos.notes} onChange={e=>setNewPos(n=>({...n,notes:e.target.value}))} placeholder="Observações, estratégia, lembrete..." style={inputStyle}/>
+              </div>
+            </div>
+
             <div style={{display:"flex",gap:"8px"}}>
               <button onClick={addPosition} style={{padding:"6px 16px",borderRadius:"6px",background:"rgba(34,197,94,0.15)",border:"1px solid rgba(34,197,94,0.3)",color:"#22c55e",fontSize:"10px",cursor:"pointer",fontFamily:"monospace"}}>✓ ADICIONAR</button>
               <button onClick={()=>setShowAdd(false)} style={{padding:"6px 16px",borderRadius:"6px",background:"rgba(0,0,0,0.2)",border:"1px solid rgba(255,255,255,0.07)",color:"#475569",fontSize:"10px",cursor:"pointer"}}>Cancelar</button>
@@ -337,29 +336,144 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
           </div>
         ):(
           <>
+            {/* Header */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 80px 70px 70px 60px 60px 28px",gap:"8px",padding:"0 8px 8px",borderBottom:"1px solid rgba(255,255,255,0.04)",fontSize:"8px",color:"#1e2d3d",letterSpacing:"1px",fontFamily:"monospace"}}>
-              <span>POSIÇÃO</span><span style={{textAlign:"right"}}>VALOR</span><span style={{textAlign:"right"}}>APY</span><span style={{textAlign:"right"}}>ENTRADA</span><span style={{textAlign:"center"}}>SCORE</span><span style={{textAlign:"center"}}>RISCO</span><span></span>
+              <span>POSIÇÃO</span><span style={{textAlign:"right"}}>VALOR</span><span style={{textAlign:"right"}}>APY</span><span style={{textAlign:"right"}}>CUSTO MÉD.</span><span style={{textAlign:"center"}}>SCORE</span><span style={{textAlign:"center"}}>RISCO</span><span></span>
             </div>
+
             {positions.map(pos=>{
               const risk2=getRisk(pos._score);
               const tokens2=extractTokens(pos.symbol);
               const volToks=tokens2.filter(t=>!isStable(t)&&VOLATILITY_COIN_MAP[t]);
               const posVol=volToks.length>0?(volToks.map(t=>volData[VOLATILITY_COIN_MAP[t]]?.annualVol).filter(Boolean).reduce((a,b)=>a+b,0)/volToks.length):null;
               const vl=getVolLabel(posVol);
+              const costBasis = pos.avgCostUSD ? Number(pos.avgCostUSD) : (pos.entryPrice||0);
+              const currentPerToken = pos.quantity>0 ? (pos.valueUSD||0) / pos.quantity : 0;
+              const positionPnLPct = costBasis>0&&currentPerToken>0 ? ((currentPerToken-costBasis)/costBasis)*100 : null;
+              const isExpanded = expandedId===pos.id;
               return (
-                <div key={pos.id} style={{display:"grid",gridTemplateColumns:"1fr 80px 70px 70px 60px 60px 28px",gap:"8px",padding:"8px",borderRadius:"7px",marginBottom:"4px",background:"rgba(0,0,0,0.15)",alignItems:"center",fontSize:"11px"}}>
-                  <div>
-                    <div style={{fontWeight:600,color:"#94a3b8",marginBottom:"1px"}}>{pos.symbol}</div>
-                    <div style={{fontSize:"9px",color:"#2d3748"}}>{pos.protocol} · {pos.chain} {posVol?<span style={{color:vl.color}}>· vol {posVol.toFixed(0)}%</span>:""}</div>
+                <div key={pos.id} style={{marginBottom:"4px"}}>
+                  {/* Main row */}
+                  <div
+                    onClick={()=>setExpandedId(v=>v===pos.id?null:pos.id)}
+                    style={{display:"grid",gridTemplateColumns:"1fr 80px 70px 70px 60px 60px 28px",gap:"8px",padding:"8px",borderRadius:isExpanded?"7px 7px 0 0":"7px",background:"rgba(0,0,0,0.15)",alignItems:"center",fontSize:"11px",cursor:"pointer",border:`1px solid ${isExpanded?"rgba(99,102,241,0.2)":"transparent"}`,borderBottom:isExpanded?"none":"1px solid transparent"}}>
+                    <div>
+                      <div style={{fontWeight:600,color:"#94a3b8",marginBottom:"1px",display:"flex",alignItems:"center",gap:"5px"}}>
+                        {pos.symbol}
+                        {pos.tokenContract&&<span title={pos.tokenContract} style={{fontSize:"8px",color:"#6366f1",background:"rgba(99,102,241,0.1)",padding:"1px 4px",borderRadius:"3px",fontFamily:"monospace",cursor:"help"}}>📄</span>}
+                        {pos.notes&&<span title={pos.notes} style={{fontSize:"8px",color:"#f59e0b",background:"rgba(245,158,11,0.1)",padding:"1px 4px",borderRadius:"3px",cursor:"help"}}>📝</span>}
+                      </div>
+                      <div style={{fontSize:"9px",color:"#2d3748"}}>
+                        {pos.protocol} · {pos.chain}
+                        {posVol?<span style={{color:vl.color}}> · vol {posVol.toFixed(0)}%</span>:""}
+                        {pos.quantity>0&&<span style={{color:"#475569"}}> · {fmt(pos.quantity,2)} tkn</span>}
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right",fontFamily:"monospace",color:"#3b82f6",fontWeight:700}}>${fmt(pos.valueUSD,0)}</div>
+                    <div style={{textAlign:"right",fontFamily:"monospace",color:"#22c55e"}}>{pos.apy>0?`${fmt(pos.apy,1)}%`:"—"}</div>
+                    <div style={{textAlign:"right",fontSize:"10px",fontFamily:"monospace"}}>
+                      {costBasis>0?(
+                        <div>
+                          <div style={{color:"#64748b"}}>${fmt(costBasis,2)}</div>
+                          {positionPnLPct!=null&&<div style={{fontSize:"8px",color:positionPnLPct>=0?"#22c55e":"#ef4444"}}>{positionPnLPct>=0?"+":""}{fmt(positionPnLPct,1)}%</div>}
+                        </div>
+                      ):<span style={{color:"#334155"}}>—</span>}
+                    </div>
+                    <div style={{textAlign:"center"}}>
+                      <div style={{display:"inline-block",padding:"1px 6px",borderRadius:"20px",background:risk2.bg,color:risk2.color,fontSize:"10px",fontWeight:800,fontFamily:"monospace"}}>{pos._score}</div>
+                    </div>
+                    <div style={{textAlign:"center",fontSize:"9px",color:risk2.color,fontWeight:600}}>{risk2.icon}</div>
+                    <button onClick={e=>{e.stopPropagation();removePosition(pos.id);}} style={{background:"none",border:"none",color:"#1e2d3d",cursor:"pointer",fontSize:"12px",padding:"2px"}}>✕</button>
                   </div>
-                  <div style={{textAlign:"right",fontFamily:"monospace",color:"#3b82f6",fontWeight:700}}>${fmt(pos.valueUSD,0)}</div>
-                  <div style={{textAlign:"right",fontFamily:"monospace",color:"#22c55e"}}>{pos.apy>0?`${fmt(pos.apy,1)}%`:"—"}</div>
-                  <div style={{textAlign:"right",fontSize:"9px",color:"#334155",fontFamily:"monospace"}}>{pos.entryPrice>0?`$${fmt(pos.entryPrice,0)}`:"—"}</div>
-                  <div style={{textAlign:"center"}}>
-                    <div style={{display:"inline-block",padding:"1px 6px",borderRadius:"20px",background:risk2.bg,color:risk2.color,fontSize:"10px",fontWeight:800,fontFamily:"monospace"}}>{pos._score}</div>
-                  </div>
-                  <div style={{textAlign:"center",fontSize:"9px",color:risk2.color,fontWeight:600}}>{risk2.icon}</div>
-                  <button onClick={()=>removePosition(pos.id)} style={{background:"none",border:"none",color:"#1e2d3d",cursor:"pointer",fontSize:"12px",padding:"2px"}}>✕</button>
+
+                  {/* Expanded detail panel */}
+                  {isExpanded&&(
+                    <div style={{padding:"12px 14px",background:"rgba(0,0,0,0.22)",border:"1px solid rgba(99,102,241,0.2)",borderTop:"none",borderRadius:"0 0 7px 7px"}}>
+                      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:"8px",marginBottom:"8px"}}>
+                        <div>
+                          <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>CONTRATO DO TOKEN</div>
+                          <input
+                            value={pos.tokenContract||""}
+                            onChange={e=>updatePosition(pos.id,"tokenContract",e.target.value.trim())}
+                            placeholder="0x..."
+                            style={{...inputStyle,fontSize:"10px"}}
+                          />
+                          {pos.tokenContract&&(
+                            <a
+                              href={`https://basescan.org/token/${pos.tokenContract}`}
+                              target="_blank" rel="noopener noreferrer"
+                              style={{fontSize:"8px",color:"#6366f1",marginTop:"3px",display:"block"}}
+                            >🔗 Ver no Explorer →</a>
+                          )}
+                        </div>
+                        <div>
+                          <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>QUANTIDADE</div>
+                          <input
+                            value={pos.quantity||""}
+                            onChange={e=>updatePosition(pos.id,"quantity",e.target.value.replace(/[^0-9.]/g,""))}
+                            placeholder="0"
+                            style={inputStyle}
+                          />
+                        </div>
+                        <div>
+                          <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>CUSTO MÉDIO ($)</div>
+                          <input
+                            value={pos.avgCostUSD||""}
+                            onChange={e=>updatePosition(pos.id,"avgCostUSD",e.target.value.replace(/[^0-9.]/g,""))}
+                            placeholder="$ por token"
+                            style={inputStyle}
+                          />
+                        </div>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px",marginBottom:"8px"}}>
+                        <div>
+                          <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>VALOR ATUAL (USD)</div>
+                          <input
+                            value={pos.valueUSD||""}
+                            onChange={e=>updatePosition(pos.id,"valueUSD",Number(e.target.value.replace(/[^0-9.]/g,"")))}
+                            placeholder="0"
+                            style={inputStyle}
+                          />
+                        </div>
+                        <div>
+                          <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>PREÇO DE ENTRADA ($)</div>
+                          <input
+                            value={pos.entryPrice||""}
+                            onChange={e=>updatePosition(pos.id,"entryPrice",Number(e.target.value.replace(/[^0-9.]/g,"")))}
+                            placeholder="0"
+                            style={inputStyle}
+                          />
+                        </div>
+                        <div>
+                          <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>DATA ENTRADA</div>
+                          <input
+                            value={pos.entryDate||""}
+                            onChange={e=>updatePosition(pos.id,"entryDate",e.target.value)}
+                            style={inputStyle}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:"8px",color:"#334155",marginBottom:"3px",fontFamily:"monospace"}}>NOTAS</div>
+                        <input
+                          value={pos.notes||""}
+                          onChange={e=>updatePosition(pos.id,"notes",e.target.value)}
+                          placeholder="Estratégia, lembrete, observação..."
+                          style={inputStyle}
+                        />
+                      </div>
+                      {/* quick P&L detail */}
+                      {pos.quantity>0&&costBasis>0&&(
+                        <div style={{marginTop:"10px",padding:"8px 12px",background:"rgba(0,0,0,0.2)",borderRadius:"7px",display:"flex",gap:"20px",fontSize:"10px"}}>
+                          <div><div style={{fontSize:"8px",color:"#2d3748",fontFamily:"monospace"}}>CUSTO TOTAL</div><div style={{color:"#94a3b8",fontFamily:"monospace",fontWeight:600}}>${fmt(costBasis*(pos.quantity||0),2)}</div></div>
+                          <div><div style={{fontSize:"8px",color:"#2d3748",fontFamily:"monospace"}}>VALOR ATUAL</div><div style={{color:"#3b82f6",fontFamily:"monospace",fontWeight:600}}>${fmt(pos.valueUSD,2)}</div></div>
+                          {positionPnLPct!=null&&(
+                            <div><div style={{fontSize:"8px",color:"#2d3748",fontFamily:"monospace"}}>P&L</div><div style={{color:positionPnLPct>=0?"#22c55e":"#ef4444",fontFamily:"monospace",fontWeight:700}}>{positionPnLPct>=0?"+":""}{fmt(positionPnLPct,2)}%</div></div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -386,6 +500,18 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
                 })}
               </div>
             </div>
+
+            {/* Chain concentration */}
+            {Object.keys(chainConc).length>1&&(
+              <div style={{marginTop:"8px",padding:"10px",background:"rgba(0,0,0,0.1)",borderRadius:"7px"}}>
+                <div style={{fontSize:"8px",color:"#1e2d3d",letterSpacing:"1px",fontFamily:"monospace",marginBottom:"5px"}}>REDE</div>
+                <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
+                  {Object.entries(chainConc).sort((a,b)=>b[1]-a[1]).map(([chain,pct])=>(
+                    <span key={chain} style={{fontSize:"9px",color:"#475569",fontFamily:"monospace"}}>{chain}: <span style={{color:"#94a3b8",fontWeight:600}}>{pct.toFixed(0)}%</span></span>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </Card>

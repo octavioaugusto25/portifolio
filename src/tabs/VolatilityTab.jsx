@@ -1,23 +1,41 @@
 import { useEffect, useState } from "react";
-import { VOLATILITY_COIN_MAP } from "../constants";
+import { VOLATILITY_COIN_MAP, VOLATILITY_DEFILLAMA_MAP } from "../constants";
 import { calcIL, fmt, getVolLabel, suggestLPRange } from "../utils";
 import { Badge, Card, SecTitle, Spin } from "../components/primitives";
 
+// CoinGecko ID → DeFiLlama coins key (for batch price fetch)
+const CG_TO_LLAMA = {
+  "ethereum":        "coingecko:ethereum",
+  "bitcoin":         "coingecko:bitcoin",
+  "solana":          "coingecko:solana",
+  "binancecoin":     "coingecko:binancecoin",
+  "arbitrum":        "coingecko:arbitrum",
+  "optimism":        "coingecko:optimism",
+  "avalanche-2":     "coingecko:avalanche-2",
+  "matic-network":   "coingecko:matic-network",
+  "uniswap":         "coingecko:uniswap",
+  "aave":            "coingecko:aave",
+  "curve-dao-token": "coingecko:curve-dao-token",
+  "gmx":             "coingecko:gmx",
+  "pendle":          "coingecko:pendle",
+  "chainlink":       "coingecko:chainlink",
+  "lido-dao":        "coingecko:lido-dao",
+  "aerodrome-finance":"coingecko:aerodrome-finance",
+};
+
 // ─── VOLATILITY TAB ───────────────────────────────────────────────────────────
-// fetchExternal é o proxy wrapper do App.jsx — necessário para buscar preços
-// de tokens além de BTC/ETH/SOL sem bloqueio de CORS.
 export function VolatilityTab({ volData, volLoading, prices, fetchExternal }) {
-  const [ilRatio,     setIlRatio]     = useState(2);
-  const [selectedTok, setSelectedTok] = useState("ETH");
-  const [sigma,       setSigma]       = useState(1.5);
-  const [horizonDays, setHorizonDays] = useState(30);
-  const [customPrice, setCustomPrice] = useState("");
+  const [ilRatio,      setIlRatio]      = useState(2);
+  const [selectedTok,  setSelectedTok]  = useState("ETH");
+  const [sigma,        setSigma]        = useState(1.5);
+  const [horizonDays,  setHorizonDays]  = useState(30);
+  const [customPrice,  setCustomPrice]  = useState("");
 
   // ── Preços auto-buscados para qualquer token do VOLATILITY_COIN_MAP ─────
-  const [tokenPrices, setTokenPrices] = useState({});
+  const [tokenPrices,  setTokenPrices]  = useState({});
   const [priceLoading, setPriceLoading] = useState(false);
 
-  // Preenche com os preços que já temos do App
+  // Seed com os preços BTC/ETH/SOL que já temos do App
   useEffect(() => {
     setTokenPrices(prev => ({
       ...prev,
@@ -27,27 +45,86 @@ export function VolatilityTab({ volData, volLoading, prices, fetchExternal }) {
     }));
   }, [prices]);
 
-  // Quando o token selecionado muda e não temos preço, busca via CoinGecko
+  // Batch fetch all token prices via DeFiLlama /prices/current (no CORS, no rate-limit)
+  // Runs once on mount; re-runs if fetchExternal changes.
   useEffect(() => {
-    const coinId = VOLATILITY_COIN_MAP[selectedTok];
-    if (!coinId || tokenPrices[coinId]) return; // já temos o preço
+    const coinIds = Object.values(VOLATILITY_COIN_MAP).filter(id => !id.startsWith("base:") && !id.startsWith("coingecko:"));
+    // Build DeFiLlama keys
+    const llamaKeys = coinIds.map(id => CG_TO_LLAMA[id]).filter(Boolean);
+    // Also add on-chain tokens from VOLATILITY_DEFILLAMA_MAP that use chain:address
+    const onChainKeys = Object.values(VOLATILITY_DEFILLAMA_MAP)
+      .filter(k => !k.startsWith("coingecko:"))
+      .map(k => k); // e.g. "base:0x..."
+
+    const allKeys = [...new Set([...llamaKeys, ...onChainKeys])];
+    if (!allKeys.length) return;
 
     const fetch_ = fetchExternal || ((url) => fetch(url));
     setPriceLoading(true);
-    fetch_(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`)
+
+    const url = `https://coins.llama.fi/prices/current/${allKeys.join(",")}`;
+    fetch_(url)
       .then(r => r.json())
       .then(d => {
-        const usd = d?.[coinId]?.usd;
-        if (usd) setTokenPrices(prev => ({ ...prev, [coinId]: usd }));
+        const coins = d?.coins || {};
+        const newPrices = {};
+        for (const [llamaKey, data] of Object.entries(coins)) {
+          const usd = data?.price;
+          if (!usd) continue;
+          // Map llamaKey back to coinGecko ID for lookup
+          if (llamaKey.startsWith("coingecko:")) {
+            const cgId = llamaKey.replace("coingecko:", "");
+            newPrices[cgId] = usd;
+          } else {
+            // on-chain key — store as-is
+            newPrices[llamaKey] = usd;
+          }
+        }
+        setTokenPrices(prev => ({ ...prev, ...newPrices }));
+      })
+      .catch(() => {/* noop — individual fallback below */})
+      .finally(() => setPriceLoading(false));
+  }, [fetchExternal]);
+
+  // Individual fallback: when user selects a token and price is still missing
+  useEffect(() => {
+    const coinId = VOLATILITY_COIN_MAP[selectedTok];
+    if (!coinId) return;
+
+    // Check if we already have the price (by coinId or llamaKey)
+    const llamaKey = coinId.startsWith("base:") ? coinId : CG_TO_LLAMA[coinId];
+    const alreadyHave = tokenPrices[coinId] || (llamaKey && tokenPrices[llamaKey]);
+    if (alreadyHave) return;
+
+    const fetch_ = fetchExternal || ((url) => fetch(url));
+    setPriceLoading(true);
+
+    // Try DeFiLlama single coin first (more reliable)
+    const llamaId = llamaKey || `coingecko:${coinId}`;
+    fetch_(`https://coins.llama.fi/prices/current/${llamaId}`)
+      .then(r => r.json())
+      .then(d => {
+        const usd = d?.coins?.[llamaId]?.price;
+        if (usd) {
+          setTokenPrices(prev => ({ ...prev, [coinId]: usd }));
+        } else {
+          // Fallback: CoinGecko simple/price
+          return fetch_(`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`)
+            .then(r => r.json())
+            .then(d2 => {
+              const usd2 = d2?.[coinId]?.usd;
+              if (usd2) setTokenPrices(prev => ({ ...prev, [coinId]: usd2 }));
+            });
+        }
       })
       .catch(() => {/* noop */})
       .finally(() => setPriceLoading(false));
-  }, [selectedTok]);
+  }, [selectedTok]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const coinId      = VOLATILITY_COIN_MAP[selectedTok];
-  const autoPrice   = coinId ? (tokenPrices[coinId] || null) : null;
+  const coinId       = VOLATILITY_COIN_MAP[selectedTok];
+  const autoPrice    = coinId ? (tokenPrices[coinId] || null) : null;
   const currentPrice = customPrice ? Number(customPrice) : autoPrice;
-  const vd           = volData[coinId];
+  const vd           = volData[coinId] || volData[selectedTok];
   const range        = vd?.annualVol && currentPrice
     ? suggestLPRange(currentPrice, vd.annualVol, horizonDays, sigma)
     : null;
@@ -110,7 +187,7 @@ export function VolatilityTab({ volData, volLoading, prices, fetchExternal }) {
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "8px" }}>
             {tokens.map(([sym, cId]) => {
-              const vd2 = volData[cId];
+              const vd2 = volData[cId] || volData[sym];
               const vl  = getVolLabel(vd2?.annualVol);
               const p   = tokenPrices[cId];
               return (
@@ -126,18 +203,26 @@ export function VolatilityTab({ volData, volLoading, prices, fetchExternal }) {
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                     <span style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8" }}>{sym}</span>
-                    {vd2 && <span style={{ fontSize: "10px", fontWeight: 700, color: vl.color, fontFamily: "monospace" }}>{vd2.annualVol.toFixed(0)}%</span>}
+                    {vd2 ? (
+                      <span style={{ fontSize: "10px", fontWeight: 700, color: vl.color, fontFamily: "monospace" }}>{vd2.annualVol.toFixed(0)}%</span>
+                    ) : priceLoading ? (
+                      <Spin size={9}/>
+                    ) : (
+                      <span style={{ fontSize: "8px", color: "#334155" }}>—</span>
+                    )}
                   </div>
                   {vd2 ? (
                     <>
-                      <div style={{ height: "3px", background: "rgba(255,255,255,0.04)", borderRadius: "2px", overflow: "hidden", marginBottom: "4px" }}>
-                        <div style={{ height: "100%", width: `${Math.min(100, vd2.annualVol / 2)}%`, background: vl.color, borderRadius: "2px" }} />
+                      <div style={{ fontSize: "8px", color: vl.color, marginBottom: "3px" }}>{vl.label}</div>
+                      <div style={{ height: "2px", background: "rgba(255,255,255,0.04)", borderRadius: "1px", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${Math.min(100, vd2.annualVol / 2)}%`, background: vl.color }} />
                       </div>
-                      <div style={{ fontSize: "8px", color: vl.color }}>{vl.label}</div>
-                      {p && <div style={{ fontSize: "8px", color: "#475569", marginTop: "2px", fontFamily: "monospace" }}>${p >= 1 ? fmt(p, 0) : p.toFixed(4)}</div>}
+                      {p && <div style={{ fontSize: "8px", color: "#334155", marginTop: "4px", fontFamily: "monospace" }}>${p >= 1 ? fmt(p, 2) : fmt(p, 4)}</div>}
                     </>
                   ) : (
-                    <div style={{ fontSize: "8px", color: "#2d3748" }}>—</div>
+                    <div style={{ fontSize: "8px", color: "#1e2d3d", marginTop: "4px" }}>
+                      {p ? `$${p >= 1 ? fmt(p, 2) : fmt(p, 4)}` : "sem dados de vol"}
+                    </div>
                   )}
                 </div>
               );
@@ -146,50 +231,61 @@ export function VolatilityTab({ volData, volLoading, prices, fetchExternal }) {
         )}
       </Card>
 
-      {/* LP Range Calculator */}
+      {/* LP Range + IL Calculator row */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
         <Card>
-          <SecTitle icon="📐" sub="Sugestão de range baseada em volatilidade histórica">LP Range Suggester</SecTitle>
+          <SecTitle icon="⚙️" sub="Configure o token e horizonte para o range">Configuração de Range</SecTitle>
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             <div>
-              <div style={{ fontSize: "9px", color: "#334155", letterSpacing: "1px", marginBottom: "4px", fontFamily: "monospace" }}>TOKEN</div>
-              <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
-                {["ETH", "BTC", "SOL", "ARB", "OP", "LINK"].map(t => (
-                  <button
-                    key={t}
-                    onClick={() => { setSelectedTok(t); setCustomPrice(""); }}
-                    style={{
-                      padding: "3px 9px", borderRadius: "20px", fontSize: "10px", cursor: "pointer",
-                      background: selectedTok === t ? "rgba(99,102,241,0.18)" : "rgba(0,0,0,0.22)",
-                      border: `1px solid ${selectedTok === t ? "#6366f1" : "rgba(255,255,255,0.05)"}`,
-                      color: selectedTok === t ? "#a5b4fc" : "#475569"
-                    }}
-                  >{t}</button>
-                ))}
+              <div style={{ fontSize: "9px", color: "#334155", letterSpacing: "1px", marginBottom: "6px", fontFamily: "monospace" }}>TOKEN</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
+                {Object.keys(VOLATILITY_COIN_MAP).map(sym => {
+                  const cId = VOLATILITY_COIN_MAP[sym];
+                  const vd2 = volData[cId] || volData[sym];
+                  const hasData = Boolean(vd2);
+                  return (
+                    <button
+                      key={sym}
+                      onClick={() => { setSelectedTok(sym); setCustomPrice(""); }}
+                      style={{
+                        padding: "3px 8px", borderRadius: "6px", fontSize: "10px", cursor: "pointer",
+                        background: selectedTok === sym ? "rgba(99,102,241,0.18)" : "rgba(0,0,0,0.2)",
+                        border: `1px solid ${selectedTok === sym ? "#6366f1" : hasData ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.03)"}`,
+                        color: selectedTok === sym ? "#a5b4fc" : hasData ? "#64748b" : "#334155",
+                        opacity: hasData ? 1 : 0.55
+                      }}
+                    >{sym}{!hasData && " ·"}</button>
+                  );
+                })}
               </div>
             </div>
             <div>
               <div style={{ fontSize: "9px", color: "#334155", letterSpacing: "1px", marginBottom: "4px", fontFamily: "monospace" }}>
-                PREÇO ATUAL ($)
-                {autoPrice && !customPrice && (
-                  <span style={{ color: "#22c55e", marginLeft: "6px" }}>
-                    — ${fmt(autoPrice, autoPrice >= 1 ? 2 : 4)} (automático) {priceLoading && "…"}
-                  </span>
-                )}
-                {priceLoading && !autoPrice && (
-                  <span style={{ color: "#f59e0b", marginLeft: "6px" }}>buscando…</span>
-                )}
+                PREÇO DE {selectedTok}
+                {autoPrice && !customPrice && <span style={{ color: "#22c55e", marginLeft: "6px" }}>● automático</span>}
+                {!autoPrice && !customPrice && <span style={{ color: "#f59e0b", marginLeft: "6px" }}>● manual necessário</span>}
               </div>
               <input
                 value={customPrice}
                 onChange={e => setCustomPrice(e.target.value.replace(/[^0-9.]/g, ""))}
-                placeholder={autoPrice ? `${fmt(autoPrice, autoPrice >= 1 ? 2 : 4)} (automático — sobrescreva se quiser)` : "Cole o preço atual…"}
+                placeholder={autoPrice
+                  ? `${fmt(autoPrice, autoPrice >= 1 ? 2 : 4)} (automático — sobrescreva se quiser)`
+                  : `Cole o preço atual de ${selectedTok}…`}
                 style={{
                   width: "100%", padding: "7px 10px", background: "rgba(0,0,0,0.3)",
-                  border: "1px solid rgba(255,255,255,0.07)", borderRadius: "7px",
-                  color: "#f1f5f9", fontFamily: "monospace", fontSize: "12px"
+                  border: `1px solid ${customPrice ? "rgba(99,102,241,0.4)" : autoPrice ? "rgba(34,197,94,0.2)" : "rgba(245,158,11,0.3)"}`,
+                  borderRadius: "7px", color: "#f1f5f9", fontFamily: "monospace", fontSize: "12px"
                 }}
               />
+              {/* Quick price links for tokens without auto-price */}
+              {!autoPrice && !customPrice && (
+                <div style={{ marginTop: "5px", fontSize: "9px", color: "#334155" }}>
+                  Busque em{" "}
+                  <a href={`https://www.coingecko.com/en/coins/${VOLATILITY_COIN_MAP[selectedTok]}`} target="_blank" rel="noopener noreferrer" style={{ color: "#6366f1" }}>CoinGecko</a>
+                  {" "}ou{" "}
+                  <a href={`https://defillama.com/`} target="_blank" rel="noopener noreferrer" style={{ color: "#6366f1" }}>DeFiLlama</a>
+                </div>
+              )}
             </div>
             <div>
               <div style={{ fontSize: "9px", color: "#334155", letterSpacing: "1px", marginBottom: "4px", fontFamily: "monospace" }}>HORIZONTE: {horizonDays} dias</div>
@@ -220,7 +316,7 @@ export function VolatilityTab({ volData, volLoading, prices, fetchExternal }) {
           <SecTitle icon="🎯" sub="Range sugerido com base na vol histórica + sigma escolhido">Range Sugerido</SecTitle>
           {!vd ? (
             <div style={{ padding: "20px", textAlign: "center", fontSize: "10px", color: "#334155", lineHeight: 1.7 }}>
-              Volatilidade de {selectedTok} não disponível.<br />
+              Volatilidade de <strong style={{ color: "#94a3b8" }}>{selectedTok}</strong> não disponível.<br />
               <span style={{ fontSize: "8px", color: "#1e2d3d" }}>Aguarde o carregamento ou verifique limite da API.</span>
             </div>
           ) : !currentPrice ? (
@@ -231,7 +327,14 @@ export function VolatilityTab({ volData, volLoading, prices, fetchExternal }) {
                   <span style={{ fontSize: "10px", color: "#64748b" }}>Buscando preço de {selectedTok}…</span>
                 </div>
               ) : (
-                <span style={{ fontSize: "10px", color: "#334155" }}>Preço de {selectedTok} não disponível. Cole o preço manualmente.</span>
+                <div>
+                  <div style={{ fontSize: "10px", color: "#f59e0b", marginBottom: "6px" }}>
+                    Preço de <strong>{selectedTok}</strong> não disponível automaticamente.
+                  </div>
+                  <div style={{ fontSize: "9px", color: "#334155" }}>
+                    Cole o preço manualmente no campo ao lado para calcular o range.
+                  </div>
+                </div>
               )}
             </div>
           ) : range ? (
@@ -248,7 +351,8 @@ export function VolatilityTab({ volData, volLoading, prices, fetchExternal }) {
                   </div>
                   <div style={{ fontSize: "8px", color: "#334155", marginTop: "2px" }}>
                     Vol: {vd.annualVol.toFixed(1)}%/aa · Sigma: {sigma}σ · {horizonDays}d
-                    {!customPrice && autoPrice && <span style={{ color: "#22c55e" }}> · preço automático</span>}
+                    {!customPrice && autoPrice && <span style={{ color: "#22c55e" }}> · preço automático via DeFiLlama</span>}
+                    {customPrice && <span style={{ color: "#f59e0b" }}> · preço manual</span>}
                   </div>
                 </div>
                 <div style={{ padding: "14px", background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)", borderRadius: "10px" }}>
