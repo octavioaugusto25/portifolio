@@ -5,6 +5,20 @@ import { Badge, CalcTab, Card, Chg, LiquidezTab, PlanTab, PoolModal, PoolRow, Po
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
+  const fetchExternal = useCallback(async (url, options = {}) => {
+    const r = await fetch("/api/proxy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url,
+        method: options.method || "GET",
+        headers: options.headers || {},
+        body: options.body ?? null,
+      }),
+    });
+    return r;
+  }, []);
+
   const [tab,          setTab]          = useState("pools");
   const [prices,       setPrices]       = useState(null);
   const [pricesLoading,setPricesLoading]= useState(true);
@@ -32,21 +46,21 @@ export default function App() {
     setPricesLoading(true);
     setDataStatus(s=>({...s,coingecko:"loading"}));
     try {
-      const r=await fetch(`${COINGECKO}/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd,brl&include_24hr_change=true`);
+      const r=await fetchExternal(`${COINGECKO}/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd,brl&include_24hr_change=true`);
       const d=await r.json();
       setPrices({bitcoin:{usd:d.bitcoin?.usd,brl:d.bitcoin?.brl,change24h:d.bitcoin?.usd_24h_change},ethereum:{usd:d.ethereum?.usd,brl:d.ethereum?.brl,change24h:d.ethereum?.usd_24h_change},solana:{usd:d.solana?.usd,brl:d.solana?.brl,change24h:d.solana?.usd_24h_change}});
       setLastUpdate(new Date());
       setDataStatus(s=>({...s,coingecko:"ok"}));
     }catch{ setDataStatus(s=>({...s,coingecko:"error"})); }
     finally{ setPricesLoading(false); }
-  },[]);
+  },[fetchExternal]);
 
   // ── Fetch pools ──
   const fetchPools = useCallback(async()=>{
     setPoolsLoading(true);
     setDataStatus(s=>({...s,defillama:"loading"}));
     try {
-      const r=await fetch(DEFILLAMA_YIELDS);
+      const r=await fetchExternal(DEFILLAMA_YIELDS);
       const d=await r.json();
       const processed=d.data.filter(p=>CHAINS_OK.includes(p.chain)&&p.tvlUsd>300_000&&p.apy>1&&p.apy<300)
         .map(p=>({...p,_auditEntry:getAuditEntry(p.project),_liqScore:calcLiquidityScore(p)}))
@@ -56,7 +70,7 @@ export default function App() {
       setDataStatus(s=>({...s,defillama:"ok"}));
     }catch{ setDataStatus(s=>({...s,defillama:"error"})); }
     finally{ setPoolsLoading(false); }
-  },[]);
+  },[fetchExternal]);
 
   // ── Fetch Uniswap ──
   const fetchUniswap = useCallback(async()=>{
@@ -64,7 +78,7 @@ export default function App() {
     const query=`{ pools(first:200,orderBy:volumeUSD,orderDirection:desc){ id token0{symbol} token1{symbol} volumeUSD txCount totalValueLockedUSD } }`;
     for(const url of [UNISWAP_SUBGRAPH,UNISWAP_ALT]){
       try{
-        const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query})});
+        const r=await fetchExternal(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query})});
         const d=await r.json();
         if(d.data?.pools?.length){
           const map={};
@@ -76,21 +90,21 @@ export default function App() {
       }catch{/* noop */}
     }
     setDataStatus(s=>({...s,uniswap:"error"}));
-  },[]);
+  },[fetchExternal]);
 
   // ── Fetch FDV ──
   const fetchFdv = useCallback(async()=>{
     setDataStatus(s=>({...s,fdv:"loading"}));
     try{
       const ids=Object.values(PROTOCOL_COIN_MAP).join(",");
-      const r=await fetch(`${COINGECKO}/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=50`);
+      const r=await fetchExternal(`${COINGECKO}/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=50`);
       const coins=await r.json();
       const map={};
       coins.forEach(c=>{ map[c.id]={fdv:c.fully_diluted_valuation,marketCap:c.market_cap,price:c.current_price}; });
       setFdvMap(map);
       setDataStatus(s=>({...s,fdv:"ok"}));
     }catch{ setDataStatus(s=>({...s,fdv:"error"})); }
-  },[]);
+  },[fetchExternal]);
 
   // ── 7. Fetch Volatility (CoinGecko 30d price history) ──
   const fetchVolatility = useCallback(async()=>{
@@ -101,7 +115,7 @@ export default function App() {
     const result = {};
     for(const coinId of priorityCoins){
       try{
-        const r = await fetch(`${COINGECKO}/coins/${coinId}/market_chart?vs_currency=usd&days=30&interval=daily`);
+        const r = await fetchExternal(`${COINGECKO}/coins/${coinId}/market_chart?vs_currency=usd&days=30&interval=daily`);
         if(!r.ok) continue;
         const d = await r.json();
         const pArr = (d.prices||[]).map(p=>p[1]);
@@ -113,17 +127,17 @@ export default function App() {
     setVolData(result);
     setVolLoading(false);
     setDataStatus(s=>({...s,vol:Object.keys(result).length>0?"ok":"error"}));
-  },[]);
+  },[fetchExternal]);
 
   const pingSource = useCallback(async (url, key) => {
     setDataStatus(s => ({ ...s, [key]: "loading" }));
     try {
-      const r = await fetch(url, { method: "GET" });
+      const r = await fetchExternal(url, { method: "GET" });
       setDataStatus(s => ({ ...s, [key]: r.ok ? "ok" : "error" }));
     } catch {
       setDataStatus(s => ({ ...s, [key]: "error" }));
     }
-  }, []);
+  }, [fetchExternal]);
 
   const fetchExtendedSources = useCallback(async () => {
     await Promise.all([
@@ -177,7 +191,7 @@ export default function App() {
     }`;
     for (const url of [UNISWAP_SUBGRAPH, UNISWAP_ALT]) {
       try {
-        const r = await fetch(url, {
+        const r = await fetchExternal(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query }),
@@ -207,7 +221,7 @@ export default function App() {
     setWalletPools([]);
     setWalletLoading(false);
     return [];
-  }, [allPools]);
+  }, [allPools, fetchExternal]);
 
   const narratives = detectNarratives(allPools, prices);
   const market     = getMarketContext(prices);
