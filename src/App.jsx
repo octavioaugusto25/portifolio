@@ -71,7 +71,7 @@ export default function App() {
           setDataStatus(s=>({...s,uniswap:"ok"}));
           return;
         }
-      }catch{}
+      }catch{/* noop */}
     }
     setDataStatus(s=>({...s,uniswap:"error"}));
   },[]);
@@ -106,7 +106,7 @@ export default function App() {
         const vol  = calcHistoricalVolatility(pArr);
         if(vol) result[coinId] = vol;
         await new Promise(res=>setTimeout(res,200)); // small delay to avoid rate limit
-      }catch{}
+      }catch{/* noop */}
     }
     setVolData(result);
     setVolLoading(false);
@@ -295,7 +295,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="portfolio"  && <PortfolioTab  pools={allPools} prices={prices} volData={volData}/>}
+        {tab==="portfolio"  && <PortfolioTab  pools={allPools} volData={volData}/>}
         {tab==="volatility" && <VolatilityTab volData={volData} volLoading={volLoading} prices={prices}/>}
         {tab==="ai"         && <AIAdvisorTab  pools={allPools} prices={prices} initialPool={advisorPool} key={advisorPool?.pool}/>}
         {tab==="liquidez"   && <LiquidezTab   pools={allPools} fdvData={fdvMap} dataStatus={dataStatus}/>}
