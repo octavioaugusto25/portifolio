@@ -157,7 +157,7 @@ export function PoolAnalysisPanel({ pool, volData = {}, prices, fetchExternal, o
   const poolVol   = volTokens.length > 0
     ? volTokens.map(t => {
         const id = VOLATILITY_COIN_MAP[t];
-        return volData[id]?.annualVol || volData[t]?.annualVol;
+        return volData[id]?.annualVol ?? volData[id] ?? volData[t]?.annualVol ?? volData[t];
       }).filter(Boolean).reduce((a, b, _, arr) => a + b / arr.length, 0)
     : null;
   const volLabel  = getVolLabel(poolVol);

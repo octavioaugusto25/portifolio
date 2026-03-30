@@ -177,22 +177,39 @@ export function PortfolioTab({
                 </div>
               );
             })}
-            {selectedWalletPool && (
-              <div style={{ marginTop: "10px" }}>
-                <PoolAnalysisPanel
-                  pool={{
-                    ...selectedWalletPool,
-                    entryPrice: null,
-                    rangeMin: null,
-                    rangeMax: null,
-                  }}
-                  volData={volData}
-                  prices={prices}
-                  fetchExternal={fetchExternal}
-                  onClose={() => setSelectedWalletPool(null)}
-                />
-              </div>
-            )}
+            {selectedWalletPool && (() => {
+              // ── Derivar entryPrice a partir dos transfers ETH+USDC da tx ──
+              const transfers = selectedWalletPool.transfers || [];
+              const ethTransfer  = transfers.find(t => ["ETH","WETH"].includes(t.symbol));
+              const usdcTransfer = transfers.find(t => ["USDC","USDT","DAI"].includes(t.symbol));
+              const ethAmt  = ethTransfer  ? parseFloat(ethTransfer.formattedAmount)  : null;
+              const usdcAmt = usdcTransfer ? parseFloat(usdcTransfer.formattedAmount) : null;
+              // entryPrice = USDC depositado / ETH depositado (preço implícito da posição)
+              const derivedEntryPrice = (ethAmt && usdcAmt && ethAmt > 0) ? usdcAmt / ethAmt : null;
+              // valueUSD = ETH depositado × preço atual + USDC depositado
+              const ethPrice = prices?.ethereum?.usd || 0;
+              const derivedValueUSD = (ethAmt || 0) * ethPrice + (usdcAmt || 0);
+              return (
+                <div style={{ marginTop: "10px" }}>
+                  <PoolAnalysisPanel
+                    key={selectedWalletPool.id}
+                    pool={{
+                        ...selectedWalletPool,
+                        entryPrice: derivedEntryPrice,
+                        _entryPrice: derivedEntryPrice,
+                        valueUSD: derivedValueUSD > 0 ? derivedValueUSD : selectedWalletPool.valueUSD,
+                        feeTier: selectedWalletPool.feeTier || 3000,
+                        rangeMin: null,
+                        rangeMax: null,
+                      }}
+                      volData={volData}
+                      prices={prices}
+                      fetchExternal={fetchExternal}
+                      onClose={() => setSelectedWalletPool(null)}
+                  />
+                </div>
+              );
+            })()}
           </div>
         )}
       </Card>
