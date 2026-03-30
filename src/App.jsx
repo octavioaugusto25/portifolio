@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AAVE_API, ARBITRUM_RPC, ARBITRUM_RPC_ALT, BALANCER_API, BASE_RPC, BASE_RPC_ALT, BASE_UNISWAP_V3_NPM, BASE_UNISWAP_V4_POSITIONS_NFT, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, ETH_RPC, POLYGON_RPC, POLYGON_RPC_ALT, PROTOCOL_COIN_MAP, TOKEN_DECIMALS_BY_ADDRESS, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_V3_NPM, WALLET_TRACKED_ASSETS } from "./constants";
 import { buildPoolIntelligence, calcFdvRevenueRatio, calcHistoricalVolatility, calcLiquidityScore, calcScore, detectNarratives, fmt, getAuditEntry, getMarketContext, getProtocolCoinId, getVolLabel, isPairSS, isPairSV, normalizePoolModel, suggestRebuildStrategy } from "./utils";
 import { Badge, CalcTab, Card, Chg, LiquidezTab, PlanTab, PoolModal, PoolRow, PortfolioTab, Spin, StatusDot, StrategiesTab, VolatilityTab, AIAdvisorTab } from "./ui";
+import { DEFILLAMA_COINS, WALLET_TRACKED_ASSETS, COINGECKO, BASE_RPC, BASE_RPC_ALT, ARBITRUM_RPC, ARBITRUM_RPC_ALT, POLYGON_RPC, POLYGON_RPC_ALT } from "./constants";
+ 
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
@@ -316,91 +318,181 @@ export default function App() {
     }
   }, [allPools, fetchExternal]);
 
-  const fetchWalletAssets = useCallback(async (walletAddress) => {
-    if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) return [];
-    setWalletLoading(true);
-    const rpcByChain = {
-      Base: [BASE_RPC, BASE_RPC_ALT],
-      Arbitrum: [ARBITRUM_RPC, ARBITRUM_RPC_ALT],
-      Polygon: [POLYGON_RPC, POLYGON_RPC_ALT],
-    };
-    const rpcCall = async (rpcUrl, method, params) => {
-      const payload = { jsonrpc: "2.0", id: 1, method, params };
-      const r = await fetchExternal(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      if (!r.ok) throw new Error(`${method} failed`);
-      const d = await r.json();
-      return d?.result;
-    };
-    const rpcCallWithFallback = async (rpcUrls, method, params) => {
-      for (const rpcUrl of rpcUrls) {
-        try {
-          const result = await rpcCall(rpcUrl, method, params);
-          if (result != null) return result;
-        } catch {/* noop */}
-      }
-      return null;
-    };
-    const formatUnits = (rawValue, decimals = 18) => {
-      const value = BigInt(rawValue || "0x0");
-      if (value === 0n) return 0;
-      return Number(value) / (10 ** decimals);
-    };
-    try {
-      const coinIds = [...new Set(WALLET_TRACKED_ASSETS.map(asset => asset.coinId).filter(Boolean))];
-      const priceMap = {};
-      if (coinIds.length) {
-        const r = await fetchExternal(`${COINGECKO}/simple/price?ids=${coinIds.join(",")}&vs_currencies=usd`);
+
+// Paste this inside your App component, replacing the old fetchWalletAssets:
+ 
+const fetchWalletAssets = useCallback(async (walletAddress) => {
+  if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) return [];
+  setWalletLoading(true);
+ 
+  const rpcByChain = {
+    Base:     [BASE_RPC, BASE_RPC_ALT],
+    Arbitrum: [ARBITRUM_RPC, ARBITRUM_RPC_ALT],
+    Polygon:  [POLYGON_RPC, POLYGON_RPC_ALT],
+  };
+ 
+  const rpcCall = async (rpcUrl, method, params) => {
+    const payload = { jsonrpc: "2.0", id: 1, method, params };
+    const r = await fetchExternal(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(`${method} failed`);
+    const d = await r.json();
+    return d?.result;
+  };
+ 
+  const rpcCallWithFallback = async (rpcUrls, method, params) => {
+    for (const rpcUrl of rpcUrls) {
+      try {
+        const result = await rpcCall(rpcUrl, method, params);
+        if (result != null) return result;
+      } catch {/* noop */}
+    }
+    return null;
+  };
+ 
+  const formatUnits = (rawValue, decimals = 18) => {
+    const value = BigInt(rawValue || "0x0");
+    if (value === 0n) return 0;
+    return Number(value) / (10 ** decimals);
+  };
+ 
+  try {
+    // ── Step 1: CoinGecko — only for tokens that have a coinId ──────────────
+    const cgPriceMap = {};
+    const coinIds = [...new Set(WALLET_TRACKED_ASSETS.map(a => a.coinId).filter(Boolean))];
+    if (coinIds.length) {
+      try {
+        const r = await fetchExternal(
+          `${COINGECKO}/simple/price?ids=${coinIds.join(",")}&vs_currencies=usd`
+        );
         if (r.ok) {
           const data = await r.json();
-          Object.entries(data || {}).forEach(([coinId, entry]) => { priceMap[coinId] = Number(entry?.usd || 0); });
+          Object.entries(data || {}).forEach(([id, entry]) => {
+            cgPriceMap[id] = Number(entry?.usd || 0);
+          });
         }
-      }
-      priceMap["usd-stable"] = 1;
-      const ownerArg = `0x${walletAddress.toLowerCase().replace(/^0x/, "").padStart(64, "0")}`;
-      const assets = [];
-      for (const asset of WALLET_TRACKED_ASSETS) {
-        const rpcs = rpcByChain[asset.chain] || [];
-        let rawBalance = "0x0";
+      } catch {/* CoinGecko down — DeFiLlama will cover */}
+    }
+ 
+    // ── Step 2: DeFiLlama Coins — batch ALL tokens that have a llamaKey ─────
+    // This covers: stables without coinId, ANZ, USDz, AERO, BRETT, WELL, etc.
+    // Format: coins.llama.fi/prices/current/base:0x...,arbitrum:0x...
+    const llamaPriceMap = {};
+    const llamaKeys = [...new Set(
+      WALLET_TRACKED_ASSETS.map(a => a.llamaKey).filter(Boolean)
+    )];
+    if (llamaKeys.length) {
+      try {
+        const url = `${DEFILLAMA_COINS}/${llamaKeys.join(",")}`;
+        const r = await fetchExternal(url);
+        if (r.ok) {
+          const data = await r.json();
+          // data.coins = { "base:0x...": { price, symbol, decimals, ... } }
+          Object.entries(data?.coins || {}).forEach(([key, entry]) => {
+            llamaPriceMap[key.toLowerCase()] = Number(entry?.price || 0);
+          });
+        }
+      } catch {/* DeFiLlama down — graceful degradation */}
+    }
+ 
+    // ── Step 3: Fetch on-chain balances ──────────────────────────────────────
+    const ownerArg = `0x${walletAddress.toLowerCase().replace(/^0x/, "").padStart(64, "0")}`;
+    const assets = [];
+ 
+    for (const asset of WALLET_TRACKED_ASSETS) {
+      const rpcs = rpcByChain[asset.chain] || [];
+      let rawBalance = "0x0";
+ 
+      try {
         if (asset.address) {
+          // ERC-20: balanceOf(owner)
           const data = `0x70a08231${ownerArg}`;
           rawBalance = await rpcCallWithFallback(rpcs, "eth_call", [{ to: asset.address, data }, "latest"]) || "0x0";
         } else {
+          // Native coin (ETH, POL…)
           rawBalance = await rpcCallWithFallback(rpcs, "eth_getBalance", [walletAddress, "latest"]) || "0x0";
         }
-        const amount = formatUnits(rawBalance, asset.decimals);
-        if (!Number.isFinite(amount) || amount <= 0) continue;
-        const usdPrice = asset.coinId ? (priceMap[asset.coinId] || 0) : 1;
-        const valueUSD = amount * usdPrice;
-        if (valueUSD < 1 && amount < 0.001) continue;
-        const localMatch = allPools.find(p => {
-          const poolSymbol = p.symbol?.toUpperCase().replace(/_/g, "/") || "";
-          return poolSymbol.includes(asset.symbol.toUpperCase());
-        }) || null;
-        assets.push({
-          id: `asset-${asset.chain}-${asset.symbol}`,
-          symbol: asset.symbol,
-          protocol: "Wallet spot",
-          chain: asset.chain,
-          amount,
-          valueUSD,
-          priceUsd: usdPrice,
-          source: "On-chain wallet import",
-          matchedPool: localMatch,
-          apy: 0,
-          _liqScore: localMatch?._liqScore || 0,
-          _score: localMatch?._score || (["USDC", "USDT"].includes(asset.symbol) ? 82 : asset.symbol === "ETH" || asset.symbol === "WETH" ? 74 : 62),
-        });
+      } catch {/* network error — skip token */}
+ 
+      const amount = formatUnits(rawBalance, asset.decimals);
+      if (!Number.isFinite(amount) || amount <= 0) continue;
+ 
+      // ── Step 4: Resolve price (CoinGecko → DeFiLlama → stable fallback) ──
+      let usdPrice = 0;
+ 
+      if (asset.coinId && cgPriceMap[asset.coinId]) {
+        // Best source: CoinGecko (BTC, ETH, SOL, ARB, GMX, PENDLE…)
+        usdPrice = cgPriceMap[asset.coinId];
+      } else if (asset.llamaKey && llamaPriceMap[asset.llamaKey.toLowerCase()]) {
+        // Second source: DeFiLlama Coins (ANZ, USDz, AERO, BRETT, stables…)
+        usdPrice = llamaPriceMap[asset.llamaKey.toLowerCase()];
+      } else {
+        // Last resort: assume $1 for stablecoins, $0 for unknowns
+        const sym = asset.symbol.toUpperCase();
+        const isKnownStable = ["USDC","USDT","DAI","FRAX","USDZ","USDS","LUSD"].includes(sym);
+        usdPrice = isKnownStable ? 1 : 0;
       }
-      const merged = assets
-        .sort((a, b) => b.valueUSD - a.valueUSD)
-        .filter((asset, index, arr) => arr.findIndex(other => other.symbol === asset.symbol && other.chain === asset.chain) === index);
-      setWalletLoading(false);
-      return merged;
-    } catch {
-      setWalletLoading(false);
-      return [];
+ 
+      const valueUSD = amount * usdPrice;
+ 
+      // Skip dust: less than $1 value AND less than 0.001 coins
+      if (valueUSD < 1 && amount < 0.001) continue;
+ 
+      // ── Step 5: Try to match a local pool for score/liquidity context ─────
+      const localMatch = allPools.find(p => {
+        const poolSymbol = p.symbol?.toUpperCase().replace(/_/g, "/") || "";
+        return poolSymbol.includes(asset.symbol.toUpperCase());
+      }) || null;
+ 
+      // Default score heuristic when no pool match:
+      // Stables → 82, ETH/WETH → 74, cbBTC → 70, everything else → 55
+      const defaultScore = (() => {
+        const sym = asset.symbol.toUpperCase();
+        if (["USDC","USDT","DAI","FRAX","USDZ"].includes(sym)) return 82;
+        if (["ETH","WETH"].includes(sym)) return 74;
+        if (["WBTC","CBBTC"].includes(sym)) return 70;
+        return 55;
+      })();
+ 
+      assets.push({
+        id:           `asset-${asset.chain}-${asset.symbol}`,
+        symbol:       asset.symbol,
+        protocol:     "Wallet spot",
+        chain:        asset.chain,
+        amount,
+        valueUSD,
+        priceUsd:     usdPrice,
+        priceSource:  asset.coinId && cgPriceMap[asset.coinId]
+                        ? "CoinGecko"
+                        : asset.llamaKey && llamaPriceMap[asset.llamaKey.toLowerCase()]
+                          ? "DeFiLlama"
+                          : "fallback",
+        source:       "On-chain wallet import",
+        matchedPool:  localMatch,
+        apy:          0,
+        _liqScore:    localMatch?._liqScore || 0,
+        _score:       localMatch?._score || defaultScore,
+      });
     }
-  }, [allPools, fetchExternal]);
+ 
+    // Deduplicate (same symbol + chain) and sort by value
+    const merged = assets
+      .sort((a, b) => b.valueUSD - a.valueUSD)
+      .filter((asset, index, arr) =>
+        arr.findIndex(o => o.symbol === asset.symbol && o.chain === asset.chain) === index
+      );
+ 
+    setWalletLoading(false);
+    return merged;
+ 
+  } catch {
+    setWalletLoading(false);
+    return [];
+  }
+}, [allPools, fetchExternal]);
 
   const narratives = detectNarratives(allPools, prices);
   const market     = getMarketContext(prices);
