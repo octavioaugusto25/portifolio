@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { VOLATILITY_COIN_MAP } from "../constants";
-import { calcChainConcentration, calcDiversificationScore, calcPortfolioScore, calcRiskConcentration, extractTokens, fmt, getRisk, getVolLabel, isStable } from "../utils";
-import { Card, SecTitle } from "../components/primitives";
+import { calcChainConcentration, calcDiversificationScore, calcPortfolioScore, calcRiskConcentration, extractTokens, fmt, getPair, getRisk, getStrategy, getVolLabel, isStable } from "../utils";
+import { Badge, Card, SecTitle } from "../components/primitives";
 import { readPersisted, writePersisted } from "../persist";
 
 // ─── 11. PORTFOLIO TAB ────────────────────────────────────────────────────────
-export function PortfolioTab({pools, volData, walletPools = [], walletLoading = false, onFetchWalletPools, onFetchWalletPoolTx, onSuggestRebuild}) {
+export function PortfolioTab({pools, volData, walletPools = [], walletLoading = false, onFetchWalletPools, onFetchWalletPoolTx, onFetchWalletAssets, onSuggestRebuild}) {
   const STORAGE_KEY = "portfolio-positions-v2";
   const [positions, setPositions] = useState([]);
   const [showAdd,   setShowAdd]   = useState(false);
@@ -15,6 +15,30 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
   const [walletAddress, setWalletAddress] = useState("");
   const [txHash, setTxHash] = useState("0x4353b87721b13688efde117ccbdbe5b2dbcf42bcd369af4bff1a511b35275711");
   const [rebuildAdvice, setRebuildAdvice] = useState(null);
+  const [selectedWalletPool, setSelectedWalletPool] = useState(null);
+
+  const importWalletAssets = async () => {
+    const imported = await onFetchWalletAssets?.(walletAddress);
+    if (!imported?.length) return;
+    const importedPositions = imported.map(asset => ({
+      id: `wallet-${asset.chain}-${asset.symbol}`,
+      symbol: asset.symbol,
+      protocol: asset.protocol,
+      chain: asset.chain,
+      valueUSD: Number(asset.valueUSD || 0),
+      entryPrice: Number(asset.priceUsd || 0),
+      entryDate: new Date().toISOString().slice(0,10),
+      amount: asset.amount,
+      source: asset.source,
+      _score: asset._score || asset.matchedPool?._score || 50,
+      _liqScore: asset._liqScore || asset.matchedPool?._liqScore || 0,
+      apy: asset.apy || asset.matchedPool?.apy || 0,
+    }));
+    const manualPositions = positions.filter(p => !String(p.id).startsWith("wallet-"));
+    const updated = [...manualPositions, ...importedPositions];
+    setPositions(updated);
+    save(updated);
+  };
 
   useEffect(()=>{
     (async()=>{
@@ -67,6 +91,9 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
   const filteredPools = pools.filter(p=>poolSearch?p.symbol?.toLowerCase().includes(poolSearch.toLowerCase())||p.project?.toLowerCase().includes(poolSearch.toLowerCase()):true).slice(0,6);
 
   const divColor = divScore>=70?"#22c55e":divScore>=40?"#f59e0b":"#ef4444";
+  const selectedRisk = selectedWalletPool ? getRisk(selectedWalletPool._score || selectedWalletPool.matchedPool?._score || 0) : null;
+  const selectedPair = selectedWalletPool ? getPair(selectedWalletPool.symbol) : null;
+  const selectedStrategy = selectedWalletPool ? getStrategy(selectedWalletPool.matchedPool || selectedWalletPool) : null;
   return (
     <div style={{display:"flex",flexDirection:"column",gap:"14px"}}>
       <Card>
@@ -79,6 +106,7 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
             style={{flex:1,padding:"8px 10px",background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"7px",color:"#f1f5f9",fontFamily:"monospace",fontSize:"11px"}}
           />
           <button disabled={walletLoading} onClick={()=>onFetchWalletPools?.(walletAddress)} style={{padding:"8px 12px",borderRadius:"7px",fontSize:"10px",background:"rgba(99,102,241,0.15)",border:"1px solid rgba(99,102,241,0.3)",color:"#a5b4fc",cursor:walletLoading?"not-allowed":"pointer",opacity:walletLoading?0.6:1,fontFamily:"monospace"}}>Buscar pools ativas</button>
+          <button disabled={walletLoading} onClick={importWalletAssets} style={{padding:"8px 12px",borderRadius:"7px",fontSize:"10px",background:"rgba(14,165,233,0.12)",border:"1px solid rgba(14,165,233,0.3)",color:"#7dd3fc",cursor:walletLoading?"not-allowed":"pointer",opacity:walletLoading?0.6:1,fontFamily:"monospace"}}>Importar ativos</button>
         </div>
         <div style={{display:"flex",gap:"8px",marginBottom:"10px"}}>
           <input
@@ -93,13 +121,13 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
         {!walletLoading && walletPools.length>0 && (
           <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
             {walletPools.map(wp=>(
-              <div key={wp.id} style={{padding:"8px",borderRadius:"7px",background:"rgba(0,0,0,0.2)",display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"center"}}>
+              <div key={wp.id} onClick={()=>{setSelectedWalletPool(wp);setRebuildAdvice(onSuggestRebuild?.(wp.matchedPool||wp)||null);}} style={{padding:"8px",borderRadius:"7px",background:selectedWalletPool?.id===wp.id?"rgba(99,102,241,0.08)":"rgba(0,0,0,0.2)",display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"center",cursor:"pointer",border:selectedWalletPool?.id===wp.id?"1px solid rgba(99,102,241,0.25)":"1px solid transparent"}}>
                 <div>
                   <div style={{fontSize:"11px",fontWeight:700,color:"#94a3b8"}}>{wp.symbol} <span style={{fontSize:"9px",color:"#334155"}}>fee {wp.feeTier}</span></div>
                   <div style={{fontSize:"9px",color:"#334155"}}>Origem: {wp.source || "wallet"} · TVL ${fmt(wp.tvlUsd,0)} · Match local: {wp.matchedPool?`Score ${wp.matchedPool._score}`:"não encontrado"}</div>
                   {wp.tokenId && <div style={{fontSize:"9px",color:"#475569"}}>NFT #{wp.tokenId} · {wp.protocol || "LP position"}</div>}
                 </div>
-                <button onClick={()=>setRebuildAdvice(onSuggestRebuild?.(wp.matchedPool||null)||null)} style={{padding:"5px 9px",borderRadius:"6px",fontSize:"9px",background:"rgba(34,197,94,0.12)",border:"1px solid rgba(34,197,94,0.3)",color:"#22c55e",cursor:"pointer"}}>Estratégia remontar</button>
+                <button onClick={(e)=>{e.stopPropagation();setSelectedWalletPool(wp);setRebuildAdvice(onSuggestRebuild?.(wp.matchedPool||wp)||null);}} style={{padding:"5px 9px",borderRadius:"6px",fontSize:"9px",background:"rgba(34,197,94,0.12)",border:"1px solid rgba(34,197,94,0.3)",color:"#22c55e",cursor:"pointer"}}>Estratégia remontar</button>
               </div>
             ))}
           </div>
@@ -107,12 +135,62 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
         {!walletLoading && (walletAddress || txHash) && walletPools.length===0 && (
           <div style={{fontSize:"10px",color:"#475569"}}>Nenhuma posição encontrada com essa carteira/tx.</div>
         )}
+        <div style={{fontSize:"9px",color:"#475569",marginTop:"6px"}}>Importar ativos cruza Base, Polygon e Arbitrum com lista curada de tokens para ignorar spam.</div>
         {rebuildAdvice && (
           <div style={{marginTop:"10px",padding:"10px",background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.2)",borderRadius:"8px"}}>
             <div style={{fontSize:"10px",fontWeight:700,color:"#a5b4fc",marginBottom:"3px"}}>{rebuildAdvice.title}</div>
             <div style={{fontSize:"10px",color:"#94a3b8",lineHeight:1.6}}>{rebuildAdvice.action}</div>
             <div style={{fontSize:"9px",color:"#64748b",marginTop:"4px"}}>Cadência sugerida: {rebuildAdvice.cadence}</div>
           </div>
+        )}
+        {selectedWalletPool && (
+          <Card glow="#6366f1" style={{marginTop:"10px",padding:"14px"}}>
+            <SecTitle icon="🧠" sub="Clique em outra posição para comparar">Detalhes da posição</SecTitle>
+            <div style={{display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"flex-start",marginBottom:"12px"}}>
+              <div>
+                <div style={{fontSize:"18px",fontWeight:800,color:"#f1f5f9"}}>{selectedWalletPool.symbol}</div>
+                <div style={{fontSize:"10px",color:"#64748b",marginTop:"4px"}}>{selectedWalletPool.protocol || selectedWalletPool.matchedPool?.project || "LP position"} · {selectedWalletPool.chain || selectedWalletPool.matchedPool?.chain || "Base"}</div>
+              </div>
+              <div style={{display:"flex",gap:"6px",flexWrap:"wrap",justifyContent:"flex-end"}}>
+                <Badge color={selectedRisk?.color || "#64748b"} sm>{selectedRisk?.label || "Sem score"}</Badge>
+                <Badge color={selectedPair?.color || "#64748b"} sm>{selectedPair?.label || "Par"}</Badge>
+                <Badge color={selectedStrategy?.color || "#64748b"} sm>{selectedStrategy?.type || "Estratégia"}</Badge>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px",marginBottom:"12px"}}>
+              {[
+                {label:"Taxa", value:`${((selectedWalletPool.feeTier || 0)/10000).toFixed(2)}%`, color:"#a5b4fc"},
+                {label:"NFT", value:selectedWalletPool.tokenId ? `#${selectedWalletPool.tokenId}` : "—", color:"#f59e0b"},
+                {label:"APY local", value:selectedWalletPool.matchedPool ? `${fmt(selectedWalletPool.matchedPool.apy || 0,1)}%` : "—", color:"#22c55e"},
+                {label:"Score", value:`${selectedWalletPool.matchedPool?._score || selectedWalletPool._score || 0}/100`, color:selectedRisk?.color || "#64748b"},
+              ].map(item=>(
+                <div key={item.label} style={{padding:"10px",borderRadius:"10px",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.05)"}}>
+                  <div style={{fontSize:"9px",color:"#475569",marginBottom:"4px",letterSpacing:"1px"}}>{item.label}</div>
+                  <div style={{fontSize:"16px",fontWeight:800,color:item.color,fontFamily:"monospace"}}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:"10px"}}>
+              <div style={{padding:"10px",borderRadius:"10px",background:"rgba(0,0,0,0.18)",border:"1px solid rgba(255,255,255,0.04)"}}>
+                <div style={{fontSize:"10px",fontWeight:700,color:"#cbd5e1",marginBottom:"8px"}}>Aporte detectado</div>
+                {selectedWalletPool.positionValueEth && <div style={{fontSize:"10px",color:"#94a3b8",marginBottom:"4px"}}>ETH: {selectedWalletPool.positionValueEth}</div>}
+                {(selectedWalletPool.transfers || []).length > 0 ? (
+                  <div style={{display:"flex",flexDirection:"column",gap:"4px"}}>
+                    {selectedWalletPool.transfers.map(t=>(
+                      <div key={`${selectedWalletPool.id}-${t.address}`} style={{fontSize:"10px",color:"#94a3b8"}}>{t.symbol}: {t.formattedAmount}</div>
+                    ))}
+                  </div>
+                ) : <div style={{fontSize:"10px",color:"#475569"}}>Sem transferências ERC-20 identificadas no receipt.</div>}
+              </div>
+              <div style={{padding:"10px",borderRadius:"10px",background:"rgba(0,0,0,0.18)",border:"1px solid rgba(255,255,255,0.04)"}}>
+                <div style={{fontSize:"10px",fontWeight:700,color:"#cbd5e1",marginBottom:"8px"}}>Operação</div>
+                <div style={{fontSize:"10px",color:"#94a3b8",lineHeight:1.7}}>Fee tier: {selectedWalletPool.feeTier} bps</div>
+                <div style={{fontSize:"10px",color:"#94a3b8",lineHeight:1.7}}>Fonte: {selectedWalletPool.source}</div>
+                <div style={{fontSize:"10px",color:"#94a3b8",lineHeight:1.7}}>Tx: {selectedWalletPool.txHash ? `${selectedWalletPool.txHash.slice(0,10)}...${selectedWalletPool.txHash.slice(-6)}` : "—"}</div>
+                <div style={{fontSize:"10px",color:"#94a3b8",lineHeight:1.7}}>NFT contract: {selectedWalletPool.nftContract ? `${selectedWalletPool.nftContract.slice(0,10)}...${selectedWalletPool.nftContract.slice(-6)}` : "—"}</div>
+              </div>
+            </div>
+          </Card>
         )}
       </Card>
 

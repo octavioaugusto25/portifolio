@@ -13,6 +13,10 @@ export const DEFISAFETY_API = "https://www.defisafety.com/";
 export const ETH_RPC = "https://eth.llamarpc.com";
 export const BASE_RPC = "https://base.llamarpc.com";
 export const BASE_RPC_ALT = "https://mainnet.base.org";
+export const POLYGON_RPC = "https://polygon.llamarpc.com";
+export const POLYGON_RPC_ALT = "https://polygon-rpc.com";
+export const ARBITRUM_RPC = "https://arbitrum.llamarpc.com";
+export const ARBITRUM_RPC_ALT = "https://arb1.arbitrum.io/rpc";
 export const DEBANK_PRO_API = "https://pro-openapi.debank.com/v1";
 export const UNISWAP_V3_NPM = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88";
 export const BASE_UNISWAP_V3_NPM = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
@@ -27,6 +31,31 @@ export const TOKEN_SYMBOL_BY_ADDRESS = {
   "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": "USDC",
   "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": "cbBTC",
 };
+export const TOKEN_DECIMALS_BY_ADDRESS = {
+  "0x4200000000000000000000000000000000000006": 18,
+  "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": 18,
+  "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": 6,
+  "0xdac17f958d2ee523a2206206994597c13d831ec7": 6,
+  "0x6b175474e89094c44da98b954eedeac495271d0f": 18,
+  "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": 8,
+  "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": 6,
+  "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": 8,
+};
+export const WALLET_TRACKED_ASSETS = [
+  { chain: "Base", symbol: "ETH", coinId: "ethereum", address: null, decimals: 18 },
+  { chain: "Base", symbol: "USDC", coinId: null, address: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", decimals: 6 },
+  { chain: "Base", symbol: "cbBTC", coinId: "bitcoin", address: "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", decimals: 8 },
+  { chain: "Base", symbol: "WETH", coinId: "ethereum", address: "0x4200000000000000000000000000000000000006", decimals: 18 },
+  { chain: "Arbitrum", symbol: "ETH", coinId: "ethereum", address: null, decimals: 18 },
+  { chain: "Arbitrum", symbol: "USDC", coinId: null, address: "0xaf88d065e77c8cc2239327c5edb3a432268e5831", decimals: 6 },
+  { chain: "Arbitrum", symbol: "USDT", coinId: null, address: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", decimals: 6 },
+  { chain: "Arbitrum", symbol: "ARB", coinId: "arbitrum", address: "0x912ce59144191c1204e64559fe8253a0e49e6548", decimals: 18 },
+  { chain: "Polygon", symbol: "POL", coinId: "matic-network", address: null, decimals: 18 },
+  { chain: "Polygon", symbol: "USDC", coinId: null, address: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", decimals: 6 },
+  { chain: "Polygon", symbol: "USDT", coinId: null, address: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f", decimals: 6 },
+  { chain: "Polygon", symbol: "WETH", coinId: "ethereum", address: "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619", decimals: 18 },
+  { chain: "Polygon", symbol: "WBTC", coinId: "bitcoin", address: "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6", decimals: 8 },
+];
 
 // ─── PROTOCOL LISTS ───────────────────────────────────────────────────────────
 export const SAFE_PROTOCOLS = [
