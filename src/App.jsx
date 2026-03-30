@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AAVE_API, BALANCER_API, BASE_RPC, BASE_UNISWAP_V3_NPM, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEBANK_PRO_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, ETH_RPC, PROTOCOL_COIN_MAP, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_ALT, UNISWAP_SUBGRAPH, UNISWAP_V3_NPM } from "./constants";
+import { AAVE_API, BALANCER_API, BASE_RPC, BASE_RPC_ALT, BASE_UNISWAP_V3_NPM, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEBANK_PRO_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, ETH_RPC, PROTOCOL_COIN_MAP, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_ALT, UNISWAP_SUBGRAPH, UNISWAP_V3_NPM } from "./constants";
 import { buildPoolIntelligence, calcFdvRevenueRatio, calcHistoricalVolatility, calcLiquidityScore, calcScore, detectNarratives, fmt, getAuditEntry, getMarketContext, getProtocolCoinId, getVolLabel, isPairSS, isPairSV, normalizePoolModel, suggestRebuildStrategy } from "./utils";
 import { Badge, CalcTab, Card, Chg, LiquidezTab, PlanTab, PoolModal, PoolRow, PortfolioTab, Spin, StatusDot, StrategiesTab, VolatilityTab, AIAdvisorTab } from "./ui";
 
@@ -204,6 +204,58 @@ export default function App() {
       }
       return items.filter(item => item.symbol && item.tvlUsd > 0);
     };
+    // Prefer on-chain first because your wallet is on Base and public subgraphs may 403 in production.
+    const pad64 = (h) => h.replace(/^0x/, "").padStart(64, "0");
+    const addrArg = pad64(walletAddress.toLowerCase().replace(/^0x/, ""));
+    const rpcCall = async (rpcUrl, to, data) => {
+      const payload = { jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] };
+      const r = await fetchExternal(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const d = await r.json();
+      return d?.result || "0x";
+    };
+    const rpcCallWithFallback = async (rpcUrls, to, data) => {
+      for (const rpcUrl of rpcUrls) {
+        try {
+          const result = await rpcCall(rpcUrl, to, data);
+          if (result && result !== "0x") return result;
+        } catch {/* noop */}
+      }
+      return "0x";
+    };
+    try {
+      for (const network of [
+        { name: "Base", rpcs: [BASE_RPC, BASE_RPC_ALT], npm: BASE_UNISWAP_V3_NPM, project: "uniswap-base" },
+        { name: "Ethereum", rpcs: [ETH_RPC], npm: UNISWAP_V3_NPM, project: "uniswap" },
+      ]) {
+        const balHex = await rpcCallWithFallback(network.rpcs, network.npm, `0x70a08231${addrArg}`);
+        const bal = Number(BigInt(balHex || "0x0"));
+        const lim = Math.min(8, bal);
+        const fallback = [];
+        for (let i = 0; i < lim; i++) {
+          const idx = pad64(`0x${i.toString(16)}`);
+          const tokenHex = await rpcCallWithFallback(network.rpcs, network.npm, `0x2f745c59${addrArg}${idx}`);
+          const tokenId = BigInt(tokenHex || "0x0");
+          const tokenIdArg = pad64(`0x${tokenId.toString(16)}`);
+          const pos = await rpcCallWithFallback(network.rpcs, network.npm, `0x99fbab88${tokenIdArg}`);
+          if (!pos || pos === "0x") continue;
+          const chunks = pos.replace(/^0x/, "").match(/.{1,64}/g) || [];
+          const token0 = `0x${chunks[2]?.slice(24) || ""}`.toLowerCase();
+          const token1 = `0x${chunks[3]?.slice(24) || ""}`.toLowerCase();
+          const fee = Number(BigInt(`0x${chunks[4] || "0"}`));
+          const liquidity = BigInt(`0x${chunks[7] || "0"}`);
+          if (liquidity === 0n) continue;
+          const s0 = TOKEN_SYMBOL_BY_ADDRESS[token0] || `${token0.slice(0, 6)}…`;
+          const s1 = TOKEN_SYMBOL_BY_ADDRESS[token1] || `${token1.slice(0, 6)}…`;
+          const symbol = `${s0}/${s1}`;
+          fallback.push({ id: `${network.name.toLowerCase()}-${tokenId.toString()}`, symbol, feeTier: fee, liquidity: liquidity.toString(), tvlUsd: 0, volumeUsd: 0, chain: network.name, source: `${network.name} on-chain`, matchedPool: scoreLocalMatch(symbol, network.project) });
+        }
+        if (fallback.length > 0) {
+          setWalletPools(fallback);
+          setWalletLoading(false);
+          return fallback;
+        }
+      }
+    } catch {/* noop */}
     const query = `{
       positions(first: 30, where: { owner: "${owner}", liquidity_gt: "0" }) {
         id
@@ -225,6 +277,7 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query }),
         });
+        if (!r.ok) continue;
         const d = await r.json();
         const positions = d?.data?.positions || [];
         if (positions.length) {
@@ -247,49 +300,6 @@ export default function App() {
         }
       } catch {/* noop */}
     }
-    // Fallback on-chain: try Base first, then Ethereum.
-    const pad64 = (h) => h.replace(/^0x/, "").padStart(64, "0");
-    const addrArg = pad64(walletAddress.toLowerCase().replace(/^0x/, ""));
-    const rpcCall = async (rpcUrl, to, data) => {
-      const payload = { jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] };
-      const r = await fetchExternal(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const d = await r.json();
-      return d?.result || "0x";
-    };
-    try {
-      for (const network of [
-        { name: "Base", rpc: BASE_RPC, npm: BASE_UNISWAP_V3_NPM, project: "uniswap-base" },
-        { name: "Ethereum", rpc: ETH_RPC, npm: UNISWAP_V3_NPM, project: "uniswap" },
-      ]) {
-        const balHex = await rpcCall(network.rpc, network.npm, `0x70a08231${addrArg}`);
-        const bal = Number(BigInt(balHex || "0x0"));
-        const lim = Math.min(8, bal);
-        const fallback = [];
-        for (let i = 0; i < lim; i++) {
-          const idx = pad64(`0x${i.toString(16)}`);
-          const tokenHex = await rpcCall(network.rpc, network.npm, `0x2f745c59${addrArg}${idx}`);
-          const tokenId = BigInt(tokenHex || "0x0");
-          const tokenIdArg = pad64(`0x${tokenId.toString(16)}`);
-          const pos = await rpcCall(network.rpc, network.npm, `0x99fbab88${tokenIdArg}`);
-          if (!pos || pos === "0x") continue;
-          const chunks = pos.replace(/^0x/, "").match(/.{1,64}/g) || [];
-          const token0 = `0x${chunks[2]?.slice(24) || ""}`.toLowerCase();
-          const token1 = `0x${chunks[3]?.slice(24) || ""}`.toLowerCase();
-          const fee = Number(BigInt(`0x${chunks[4] || "0"}`));
-          const liquidity = BigInt(`0x${chunks[7] || "0"}`);
-          if (liquidity === 0n) continue;
-          const s0 = TOKEN_SYMBOL_BY_ADDRESS[token0] || `${token0.slice(0, 6)}…`;
-          const s1 = TOKEN_SYMBOL_BY_ADDRESS[token1] || `${token1.slice(0, 6)}…`;
-          const symbol = `${s0}/${s1}`;
-          fallback.push({ id: `${network.name.toLowerCase()}-${tokenId.toString()}`, symbol, feeTier: fee, liquidity: liquidity.toString(), tvlUsd: 0, volumeUsd: 0, chain: network.name, source: `${network.name} on-chain`, matchedPool: scoreLocalMatch(symbol, network.project) });
-        }
-        if (fallback.length > 0) {
-          setWalletPools(fallback);
-          setWalletLoading(false);
-          return fallback;
-        }
-      }
-    } catch {/* noop */}
     if (debankAccessKey) {
       for (const url of [
         `${DEBANK_PRO_API}/user/all_complex_protocol_list?id=${owner}`,
