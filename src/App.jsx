@@ -749,8 +749,8 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
         )}
 
         {tab==="portfolio"  && <PortfolioTab pools={allPools} volData={volData} walletPools={walletPools} walletLoading={walletLoading} onFetchWalletPools={fetchWalletActivePools} onFetchWalletPoolTx={fetchWalletPoolFromBaseTx} onFetchWalletAssets={fetchWalletAssets} onSuggestRebuild={(pool)=>suggestRebuildStrategy(pool, volData)}/>}
-        {tab==="volatility" && <VolatilityTab volData={volData} volLoading={volLoading} prices={prices}/>}
-        {tab==="ai"         && <AIAdvisorTab  pools={allPools} prices={prices} initialPool={advisorPool} key={advisorPool?.pool}/>}
+        {tab==="volatility" && <VolatilityTab volData={volData} volLoading={volLoading} prices={prices} fetchExternal={fetchExternal}/>}
+        {tab==="ai"         && <AIAdvisorTab pools={allPools} prices={prices} initialPool={advisorPool} key={advisorPool?.pool} fetchExternal={fetchExternal}/>}
         {tab==="liquidez"   && <LiquidezTab   pools={allPools} fdvData={fdvMap} dataStatus={dataStatus}/>}
         {tab==="estrategias"&& <StrategiesTab pools={allPools} prices={prices} volData={volData}/>}
         {tab==="precos"     && (
