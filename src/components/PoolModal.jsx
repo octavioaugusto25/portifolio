@@ -94,6 +94,10 @@ export const PoolModal = ({pool,onClose,onAdvise,volData})=>{
             </div>
           ))}
         </div>
+        <div style={{fontSize:"9px",color:"#64748b",marginBottom:"12px",lineHeight:1.6}}>
+          <strong style={{color:"#94a3b8"}}>FDV/TVL</strong> = valuation relativa (quanto o mercado paga por cada $1 de liquidez).<br/>
+          <strong style={{color:"#94a3b8"}}>FDV/REV</strong> = valuation vs receita estimada anual (via volume e fee proxy).
+        </div>
 
         {/* Volatility context if available */}
         {poolVol && (

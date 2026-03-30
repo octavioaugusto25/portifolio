@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Card, SecTitle } from "../components/primitives";
+import { readPersisted, writePersisted } from "../persist";
 
 // ─── PLAN TAB ─────────────────────────────────────────────────────────────────
 export function PlanTab() {
@@ -16,8 +17,8 @@ export function PlanTab() {
   const [acoes,setAcoes]=useState(def);
   const [objetivo,setObjetivo]=useState("100 BTC");
   const feitas=acoes.filter(a=>a.feito).length;
-  useEffect(()=>{(async()=>{try{const r=await window.storage?.get("meu-plano-v6");if(r){const d=JSON.parse(r.value);setAcoes(d.acoes||def);setObjetivo(d.objetivo||"100 BTC");}}catch{/* noop */}})();},[]);
-  const save=async()=>{try{await window.storage?.set("meu-plano-v6",JSON.stringify({acoes,objetivo}));}catch{/* noop */}};
+  useEffect(()=>{(async()=>{try{const raw=await readPersisted("meu-plano-v6");if(raw){const d=JSON.parse(raw);setAcoes(d.acoes||def);setObjetivo(d.objetivo||"100 BTC");}}catch{/* noop */}})();},[]);
+  const save=async()=>{await writePersisted("meu-plano-v6",JSON.stringify({acoes,objetivo}));};
   return (
     <div style={{display:"flex",flexDirection:"column",gap:"14px"}}>
       <Card style={{background:"linear-gradient(135deg,#0c1e3d,#070f1a)",border:"1px solid rgba(99,102,241,0.18)"}}>

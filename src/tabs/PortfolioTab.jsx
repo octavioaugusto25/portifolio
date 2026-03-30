@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { VOLATILITY_COIN_MAP } from "../constants";
 import { calcChainConcentration, calcDiversificationScore, calcPortfolioScore, calcRiskConcentration, extractTokens, fmt, getRisk, getVolLabel, isStable } from "../utils";
 import { Card, SecTitle } from "../components/primitives";
+import { readPersisted, writePersisted } from "../persist";
 
 // ─── 11. PORTFOLIO TAB ────────────────────────────────────────────────────────
 export function PortfolioTab({pools, volData, walletPools = [], walletLoading = false, onFetchWalletPools, onSuggestRebuild}) {
@@ -15,11 +16,17 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
   const [rebuildAdvice, setRebuildAdvice] = useState(null);
 
   useEffect(()=>{
-    (async()=>{ try{ const r=await window.storage?.get(STORAGE_KEY); if(r){setPositions(JSON.parse(r.value)||[]);} }catch{/* noop */} })();
+    (async()=>{
+      try{
+        const raw = await readPersisted(STORAGE_KEY);
+        if(raw){ setPositions(JSON.parse(raw)||[]); }
+      }catch{/* noop */}
+    })();
   },[]);
 
   const save = async(pos) => {
-    try{ await window.storage?.set(STORAGE_KEY, JSON.stringify(pos)); setSaved(true); setTimeout(()=>setSaved(false),2000); }catch{/* noop */}
+    const ok = await writePersisted(STORAGE_KEY, JSON.stringify(pos));
+    if(ok){ setSaved(true); setTimeout(()=>setSaved(false),2000); }
   };
 
   const addPosition = () => {
