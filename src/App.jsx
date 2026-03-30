@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AAVE_API, ARBITRUM_RPC, ARBITRUM_RPC_ALT, BALANCER_API, BASE_RPC, BASE_RPC_ALT, BASE_UNISWAP_V3_NPM, BASE_UNISWAP_V4_POSITIONS_NFT, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, ETH_RPC, POLYGON_RPC, POLYGON_RPC_ALT, PROTOCOL_COIN_MAP, TOKEN_DECIMALS_BY_ADDRESS, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_V3_NPM, WALLET_TRACKED_ASSETS, DEFILLAMA_COINS } from "./constants";
+import {
+  AAVE_API, ARBITRUM_RPC, ARBITRUM_RPC_ALT, BALANCER_API,
+  BASE_RPC, BASE_RPC_ALT, BASE_UNISWAP_V3_NPM, BASE_UNISWAP_V4_POSITIONS_NFT,
+  CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API,
+  DEFILLAMA_CHART,          // ★ NEW — chart history API
+  DEFILLAMA_COINS, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API,
+  ETH_RPC, POLYGON_RPC, POLYGON_RPC_ALT, PROTOCOL_COIN_MAP,
+  TOKEN_DECIMALS_BY_ADDRESS, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_V3_NPM,
+  VOLATILITY_DEFILLAMA_MAP, // ★ NEW — DeFiLlama coin IDs for vol chart
+  WALLET_TRACKED_ASSETS,
+} from "./constants";
 
 import { buildPoolIntelligence, calcFdvRevenueRatio, calcHistoricalVolatility, calcLiquidityScore, calcScore, detectNarratives, fmt, getAuditEntry, getMarketContext, getProtocolCoinId, getVolLabel, isPairSS, isPairSV, normalizePoolModel, suggestRebuildStrategy } from "./utils";
 import { Badge, CalcTab, Card, Chg, LiquidezTab, PlanTab, PoolModal, PoolRow, PortfolioTab, Spin, StatusDot, StrategiesTab, VolatilityTab, AIAdvisorTab } from "./ui";
@@ -90,27 +100,69 @@ export default function App() {
   },[fetchExternal]);
 
   // ── 7. Fetch Volatility (CoinGecko 30d price history) ──
-  const fetchVolatility = useCallback(async()=>{
+const fetchVolatility = useCallback(async () => {
     setVolLoading(true);
-    setDataStatus(s=>({...s,vol:"loading"}));
-    // Conservative set to reduce 429 rate limits
-    const priorityCoins = ["bitcoin","ethereum","solana"];
+    setDataStatus(s => ({ ...s, vol: "loading" }));
+ 
     const result = {};
-    for(const coinId of priorityCoins){
-      try{
-        const r = await fetchExternal(`${COINGECKO}/coins/${coinId}/market_chart?vs_currency=usd&days=30&interval=daily`);
-        if(!r.ok) continue;
-        const d = await r.json();
-        const pArr = (d.prices||[]).map(p=>p[1]);
-        const vol  = calcHistoricalVolatility(pArr);
-        if(vol) result[coinId] = vol;
-        await new Promise(res=>setTimeout(res,1200));
-      }catch{/* noop */}
+ 
+    // ── Primary: DeFiLlama /chart — batch request, all tokens, no key needed
+    // Response: { coins: { "coingecko:ethereum": { prices: [[ts, price], ...] } } }
+    try {
+      const coinIds = [...new Set(Object.values(VOLATILITY_DEFILLAMA_MAP))].join(",");
+      const start   = Math.floor(Date.now() / 1000) - 30 * 24 * 3600; // 30 days ago
+      const r = await fetchExternal(
+        `${DEFILLAMA_CHART}/${coinIds}?start=${start}&span=30&period=1d`
+      );
+      if (!r.ok) throw new Error(`DeFiLlama chart ${r.status}`);
+      const d = await r.json();
+ 
+      for (const [llamaId, coin] of Object.entries(d.coins || {})) {
+        const prices = (coin.prices || []).map(p => p[1]);
+        if (prices.length < 5) continue;
+        const vol = calcHistoricalVolatility(prices);
+        if (!vol) continue;
+ 
+        // Store by full llamaId ("coingecko:ethereum")
+        result[llamaId] = vol;
+        // Also store by bare CoinGecko ID ("ethereum") for backward-compat
+        // with VOLATILITY_COIN_MAP used in PoolRow / PoolModal
+        if (llamaId.startsWith("coingecko:")) {
+          result[llamaId.replace("coingecko:", "")] = vol;
+        }
+      }
+      // If DeFiLlama returned at least some data, mark vol source as ok
+      if (Object.keys(result).length > 0) {
+        setVolData(result);
+        setVolLoading(false);
+        setDataStatus(s => ({ ...s, vol: "ok" }));
+        return;
+      }
+      throw new Error("DeFiLlama returned empty coins object");
+    } catch (err) {
+      console.warn("[Vol] DeFiLlama chart failed, falling back to CoinGecko:", err.message);
     }
+ 
+    // ── Fallback: CoinGecko (sequential with delay to avoid 429)
+    const fallbackCoins = ["bitcoin", "ethereum", "solana"];
+    for (const coinId of fallbackCoins) {
+      try {
+        const r = await fetchExternal(
+          `${COINGECKO}/coins/${coinId}/market_chart?vs_currency=usd&days=30&interval=daily`
+        );
+        if (!r.ok) continue;
+        const d    = await r.json();
+        const pArr = (d.prices || []).map(p => p[1]);
+        const vol  = calcHistoricalVolatility(pArr);
+        if (vol) result[coinId] = vol;
+        await new Promise(res => setTimeout(res, 1300));
+      } catch {/* noop */}
+    }
+ 
     setVolData(result);
     setVolLoading(false);
-    setDataStatus(s=>({...s,vol:Object.keys(result).length>0?"ok":"error"}));
-  },[fetchExternal]);
+    setDataStatus(s => ({ ...s, vol: Object.keys(result).length > 0 ? "ok" : "error" }));
+  }, [fetchExternal]);
 
   const fetchExtendedSources = useCallback(async () => {
     setDataStatus(s => ({

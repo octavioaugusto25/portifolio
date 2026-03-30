@@ -1,9 +1,10 @@
 // ─── APIS ─────────────────────────────────────────────────────────────────────
 export const COINGECKO        = "https://api.coingecko.com/api/v3";
 export const DEFILLAMA_YIELDS = "https://yields.llama.fi/pools";
-// ★ NEW — accepts any chain:address pair, no API key needed
-// Usage: /prices/current/base:0xADDRESS,arbitrum:0xADDRESS2
 export const DEFILLAMA_COINS  = "https://coins.llama.fi/prices/current";
+// ★ Historical chart API — no API key required
+// Usage: /chart/coingecko:ethereum,coingecko:bitcoin?start=UNIX&span=30&period=1d
+export const DEFILLAMA_CHART  = "https://coins.llama.fi/chart";
 export const UNISWAP_SUBGRAPH = "https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3";
 export const UNISWAP_ALT      = "https://api.thegraph.com/subgraphs/name/messari/uniswap-v3-ethereum";
 export const CURVE_API        = "https://api.curve.fi/api/getPools/ethereum/main";
@@ -39,6 +40,8 @@ export const TOKEN_SYMBOL_BY_ADDRESS = {
   "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf": "cbBTC",
   "0x50c5725949a6f0c72e6c4a641f24049a917db0cb": "DAI",
   "0x0555e30da8f98308edb960aa94c0db47230d2b9c": "WBTC",
+  // ★ ANZ — Anzen Finance governance token on Base (corrected address)
+  "0xeec468333ccc16d4bf1cef497a56cf8c0aae4ca3": "ANZ",
   // Ethereum
   "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": "WETH",
   "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "USDC",
@@ -64,46 +67,47 @@ export const TOKEN_DECIMALS_BY_ADDRESS = {
   "0xc2132d05d31c914a87c6611c10748aeb04b58e8f": 6,
   "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619": 18,
   "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6": 8,
+  // ★ ANZ on Base — 18 decimals
+  "0xeec468333ccc16d4bf1cef497a56cf8c0aae4ca3": 18,
 };
 
 // ─── WALLET TRACKED ASSETS ───────────────────────────────────────────────────
-// coinId      → CoinGecko ID (for known tokens) — used as primary price source
-// llamaKey    → "chain:address" key for DeFiLlama Coins API (fallback/supplement)
-//               DeFiLlama resolves prices for ANY token with on-chain liquidity
-//               even if it's not listed on CoinGecko.
+// coinId   → CoinGecko ID (primary price source)
+// llamaKey → "chain:address" for DeFiLlama Coins API (fallback)
 export const WALLET_TRACKED_ASSETS = [
   // ── Base ──────────────────────────────────────────────────────────────────
-  { chain: "Base", symbol: "ETH",   coinId: "ethereum", llamaKey: null,                                                                 address: null,                                                       decimals: 18 },
-  { chain: "Base", symbol: "USDC",  coinId: null,        llamaKey: "base:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",                   address: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",              decimals: 6  },
-  { chain: "Base", symbol: "WETH",  coinId: "ethereum",  llamaKey: "base:0x4200000000000000000000000000000000000006",                   address: "0x4200000000000000000000000000000000000006",              decimals: 18 },
-  { chain: "Base", symbol: "cbBTC", coinId: "bitcoin",   llamaKey: "base:0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",                   address: "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",              decimals: 8  },
-  { chain: "Base", symbol: "DAI",   coinId: null,        llamaKey: "base:0x50c5725949a6f0c72e6c4a641f24049a917db0cb",                   address: "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",              decimals: 18 },
+  { chain: "Base", symbol: "ETH",   coinId: "ethereum",         llamaKey: null,                                                                address: null,                                                       decimals: 18 },
+  { chain: "Base", symbol: "USDC",  coinId: null,               llamaKey: "base:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",                   address: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",              decimals: 6  },
+  { chain: "Base", symbol: "WETH",  coinId: "ethereum",         llamaKey: "base:0x4200000000000000000000000000000000000006",                   address: "0x4200000000000000000000000000000000000006",              decimals: 18 },
+  { chain: "Base", symbol: "cbBTC", coinId: "bitcoin",          llamaKey: "base:0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",                   address: "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",              decimals: 8  },
+  { chain: "Base", symbol: "DAI",   coinId: null,               llamaKey: "base:0x50c5725949a6f0c72e6c4a641f24049a917db0cb",                   address: "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",              decimals: 18 },
 
-  // ★ ANZ / Anzen Finance — no CoinGecko ID, resolved via DeFiLlama Coins
-  // USDz (Anzen stablecoin) on Base
-  { chain: "Base", symbol: "USDz",  coinId: null,        llamaKey: "base:0x5dc72C8b3B02e1de5B9b5C9aB0fFFCE31b1a15dA5",                 address: "0x5dc72C8b3B02e1de5B9b5C9aB0fFFCE31b1a15dA5",            decimals: 18 },
-  // ANZ governance token on Base (verify address before deploy)
-  { chain: "Base", symbol: "ANZ",   coinId: null,        llamaKey: "base:0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",                   address: "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",              decimals: 18 },
+  // ★ USDz — Anzen stablecoin on Base
+  { chain: "Base", symbol: "USDz",  coinId: null,               llamaKey: "base:0x5dc72C8b3B02e1de5B9b5C9aB0fFFCE31b1a15dA5",                 address: "0x5dc72C8b3B02e1de5B9b5C9aB0fFFCE31b1a15dA5",            decimals: 18 },
 
-  // ★ Other popular Base DeFi tokens — DeFiLlama resolves all of these
-  { chain: "Base", symbol: "AERO",  coinId: "aerodrome-finance", llamaKey: "base:0x940181a94a35a4569e4529a3cdfb74e38fd98631", address: "0x940181a94a35a4569e4529a3cdfb74e38fd98631",                    decimals: 18 },
-  { chain: "Base", symbol: "BRETT", coinId: null,        llamaKey: "base:0x532f27101965dd16442e59d40670faf5ebb142e4",                   address: "0x532f27101965dd16442e59d40670faf5ebb142e4",              decimals: 18 },
-  { chain: "Base", symbol: "WELL",  coinId: null,        llamaKey: "base:0xa88594d539cb17293cfd17359bc0da463c4f1f9e",                   address: "0xa88594d539cb17293cfd17359bc0da463c4f1f9e",              decimals: 18 },
+  // ★ ANZ — Anzen Finance governance token on Base
+  // FIXED: was 0xc1cba3... (cbETH address, wrong). Correct address confirmed via GeckoTerminal.
+  { chain: "Base", symbol: "ANZ",   coinId: null,               llamaKey: "base:0xeeC468333ccc16D4BF1cEf497A56cf8C0aAe4Ca3",                   address: "0xeeC468333ccc16D4BF1cEf497A56cf8C0aAe4Ca3",            decimals: 18 },
+
+  // Other popular Base DeFi tokens
+  { chain: "Base", symbol: "AERO",  coinId: "aerodrome-finance",llamaKey: "base:0x940181a94a35a4569e4529a3cdfb74e38fd98631",                   address: "0x940181a94a35a4569e4529a3cdfb74e38fd98631",              decimals: 18 },
+  { chain: "Base", symbol: "BRETT", coinId: null,               llamaKey: "base:0x532f27101965dd16442e59d40670faf5ebb142e4",                   address: "0x532f27101965dd16442e59d40670faf5ebb142e4",              decimals: 18 },
+  { chain: "Base", symbol: "WELL",  coinId: null,               llamaKey: "base:0xa88594d539cb17293cfd17359bc0da463c4f1f9e",                   address: "0xa88594d539cb17293cfd17359bc0da463c4f1f9e",              decimals: 18 },
 
   // ── Arbitrum ──────────────────────────────────────────────────────────────
-  { chain: "Arbitrum", symbol: "ETH",   coinId: "ethereum", llamaKey: null,                                                             address: null,                                                       decimals: 18 },
-  { chain: "Arbitrum", symbol: "USDC",  coinId: null,        llamaKey: "arbitrum:0xaf88d065e77c8cc2239327c5edb3a432268e5831",           address: "0xaf88d065e77c8cc2239327c5edb3a432268e5831",              decimals: 6  },
-  { chain: "Arbitrum", symbol: "USDT",  coinId: null,        llamaKey: "arbitrum:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",           address: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",              decimals: 6  },
-  { chain: "Arbitrum", symbol: "ARB",   coinId: "arbitrum",  llamaKey: "arbitrum:0x912ce59144191c1204e64559fe8253a0e49e6548",           address: "0x912ce59144191c1204e64559fe8253a0e49e6548",              decimals: 18 },
-  { chain: "Arbitrum", symbol: "GMX",   coinId: "gmx",       llamaKey: "arbitrum:0xfc5a1a6eb076a2c7ad06ed22c90d7e710e35ad0a",           address: "0xfc5a1a6eb076a2c7ad06ed22c90d7e710e35ad0a",              decimals: 18 },
-  { chain: "Arbitrum", symbol: "PENDLE",coinId: "pendle",    llamaKey: "arbitrum:0x0c880f6761f1af8d9aa9c466984b80dab9a8c9e8",           address: "0x0c880f6761f1af8d9aa9c466984b80dab9a8c9e8",              decimals: 18 },
+  { chain: "Arbitrum", symbol: "ETH",    coinId: "ethereum",    llamaKey: null,                                                                address: null,                                                       decimals: 18 },
+  { chain: "Arbitrum", symbol: "USDC",   coinId: null,          llamaKey: "arbitrum:0xaf88d065e77c8cc2239327c5edb3a432268e5831",               address: "0xaf88d065e77c8cc2239327c5edb3a432268e5831",              decimals: 6  },
+  { chain: "Arbitrum", symbol: "USDT",   coinId: null,          llamaKey: "arbitrum:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",               address: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",              decimals: 6  },
+  { chain: "Arbitrum", symbol: "ARB",    coinId: "arbitrum",    llamaKey: "arbitrum:0x912ce59144191c1204e64559fe8253a0e49e6548",               address: "0x912ce59144191c1204e64559fe8253a0e49e6548",              decimals: 18 },
+  { chain: "Arbitrum", symbol: "GMX",    coinId: "gmx",         llamaKey: "arbitrum:0xfc5a1a6eb076a2c7ad06ed22c90d7e710e35ad0a",               address: "0xfc5a1a6eb076a2c7ad06ed22c90d7e710e35ad0a",              decimals: 18 },
+  { chain: "Arbitrum", symbol: "PENDLE", coinId: "pendle",      llamaKey: "arbitrum:0x0c880f6761f1af8d9aa9c466984b80dab9a8c9e8",               address: "0x0c880f6761f1af8d9aa9c466984b80dab9a8c9e8",              decimals: 18 },
 
   // ── Polygon ───────────────────────────────────────────────────────────────
-  { chain: "Polygon", symbol: "POL",   coinId: "matic-network", llamaKey: null,                                                        address: null,                                                       decimals: 18 },
-  { chain: "Polygon", symbol: "USDC",  coinId: null,        llamaKey: "polygon:0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",           address: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",              decimals: 6  },
-  { chain: "Polygon", symbol: "USDT",  coinId: null,        llamaKey: "polygon:0xc2132d05d31c914a87c6611c10748aeb04b58e8f",           address: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",              decimals: 6  },
-  { chain: "Polygon", symbol: "WETH",  coinId: "ethereum",  llamaKey: "polygon:0x7ceb23fd6bc0add59e62ac25578270cff1b9f619",           address: "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619",              decimals: 18 },
-  { chain: "Polygon", symbol: "WBTC",  coinId: "bitcoin",   llamaKey: "polygon:0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",           address: "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",              decimals: 8  },
+  { chain: "Polygon", symbol: "POL",    coinId: "matic-network", llamaKey: null,                                                               address: null,                                                       decimals: 18 },
+  { chain: "Polygon", symbol: "USDC",   coinId: null,            llamaKey: "polygon:0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",              address: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",              decimals: 6  },
+  { chain: "Polygon", symbol: "USDT",   coinId: null,            llamaKey: "polygon:0xc2132d05d31c914a87c6611c10748aeb04b58e8f",              address: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",              decimals: 6  },
+  { chain: "Polygon", symbol: "WETH",   coinId: "ethereum",      llamaKey: "polygon:0x7ceb23fd6bc0add59e62ac25578270cff1b9f619",              address: "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619",              decimals: 18 },
+  { chain: "Polygon", symbol: "WBTC",   coinId: "bitcoin",       llamaKey: "polygon:0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",              address: "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",              decimals: 8  },
 ];
 
 // ─── PROTOCOL LISTS ───────────────────────────────────────────────────────────
@@ -123,36 +127,36 @@ export const STABLES   = ["USDC","USDT","DAI","FRAX","LUSD","crvUSD","GHO","PYUS
 
 // ─── AUDIT PROXY ──────────────────────────────────────────────────────────────
 export const AUDIT_PROXY = {
-  "uniswap":        { score:95, auditors:["Trail of Bits","ABDK"],                  hacks:0, bounty:true  },
-  "curve":          { score:88, auditors:["Trail of Bits","Chainsecurity"],          hacks:1, bounty:true  },
-  "aave":           { score:93, auditors:["OpenZeppelin","Sigma Prime","Peckshield"],hacks:0, bounty:true  },
-  "compound":       { score:88, auditors:["OpenZeppelin","Trail of Bits"],           hacks:0, bounty:true  },
-  "balancer":       { score:84, auditors:["Trail of Bits","Certik"],                 hacks:1, bounty:true  },
-  "gmx":            { score:78, auditors:["ABDK","Quantstamp"],                      hacks:0, bounty:true  },
-  "lido":           { score:91, auditors:["Sigma Prime","Quantstamp","Chainsecurity"],hacks:0,bounty:true  },
-  "rocket-pool":    { score:88, auditors:["Sigma Prime","Trail of Bits"],            hacks:0, bounty:true  },
-  "pendle":         { score:76, auditors:["Ackee Blockchain","Certik"],              hacks:0, bounty:false },
-  "convex-finance": { score:80, auditors:["Mixbytes","Certik"],                      hacks:0, bounty:false },
-  "sushiswap":      { score:68, auditors:["Quantstamp"],                             hacks:1, bounty:true  },
-  "pancakeswap":    { score:70, auditors:["Certik","Peckshield"],                    hacks:0, bounty:false },
-  "velodrome":      { score:73, auditors:["Spearbit"],                               hacks:0, bounty:false },
-  "aerodrome":      { score:71, auditors:["Spearbit"],                               hacks:0, bounty:false },
+  "uniswap":        { score:95, auditors:["Trail of Bits","ABDK"],                   hacks:0, bounty:true  },
+  "curve":          { score:88, auditors:["Trail of Bits","Chainsecurity"],           hacks:1, bounty:true  },
+  "aave":           { score:93, auditors:["OpenZeppelin","Sigma Prime","Peckshield"], hacks:0, bounty:true  },
+  "compound":       { score:88, auditors:["OpenZeppelin","Trail of Bits"],            hacks:0, bounty:true  },
+  "balancer":       { score:84, auditors:["Trail of Bits","Certik"],                  hacks:1, bounty:true  },
+  "gmx":            { score:78, auditors:["ABDK","Quantstamp"],                       hacks:0, bounty:true  },
+  "lido":           { score:91, auditors:["Sigma Prime","Quantstamp","Chainsecurity"],hacks:0, bounty:true  },
+  "rocket-pool":    { score:88, auditors:["Sigma Prime","Trail of Bits"],             hacks:0, bounty:true  },
+  "pendle":         { score:76, auditors:["Ackee Blockchain","Certik"],               hacks:0, bounty:false },
+  "convex-finance": { score:80, auditors:["Mixbytes","Certik"],                       hacks:0, bounty:false },
+  "sushiswap":      { score:68, auditors:["Quantstamp"],                              hacks:1, bounty:true  },
+  "pancakeswap":    { score:70, auditors:["Certik","Peckshield"],                     hacks:0, bounty:false },
+  "velodrome":      { score:73, auditors:["Spearbit"],                                hacks:0, bounty:false },
+  "aerodrome":      { score:71, auditors:["Spearbit"],                                hacks:0, bounty:false },
   "morpho":         { score:83, auditors:["Trail of Bits","Chainsecurity"],           hacks:0, bounty:true  },
-  "trader-joe":     { score:65, auditors:["Certik"],                                 hacks:0, bounty:false },
-  "orca":           { score:70, auditors:["Kudelski Security"],                       hacks:0, bounty:false },
-  "raydium":        { score:63, auditors:["Kudelski Security"],                       hacks:1, bounty:false },
-  "kamino":         { score:68, auditors:["Sec3"],                                   hacks:0, bounty:false },
-  "meteora":        { score:62, auditors:["Sec3"],                                   hacks:0, bounty:false },
+  "trader-joe":     { score:65, auditors:["Certik"],                                  hacks:0, bounty:false },
+  "orca":           { score:70, auditors:["Kudelski Security"],                        hacks:0, bounty:false },
+  "raydium":        { score:63, auditors:["Kudelski Security"],                        hacks:1, bounty:false },
+  "kamino":         { score:68, auditors:["Sec3"],                                    hacks:0, bounty:false },
+  "meteora":        { score:62, auditors:["Sec3"],                                    hacks:0, bounty:false },
   "spark":          { score:78, auditors:["Chainsecurity"],                           hacks:0, bounty:false },
-  "euler":          { score:48, auditors:["Halborn","Sherlock"],                      hacks:1, bounty:false },
-  "synthetix":      { score:75, auditors:["Iosiro","Trail of Bits"],                 hacks:0, bounty:true  },
+  "euler":          { score:48, auditors:["Halborn","Sherlock"],                       hacks:1, bounty:false },
+  "synthetix":      { score:75, auditors:["Iosiro","Trail of Bits"],                  hacks:0, bounty:true  },
   "frax":           { score:67, auditors:["Trail of Bits"],                           hacks:0, bounty:false },
-  "stargate":       { score:65, auditors:["Quantstamp"],                             hacks:0, bounty:false },
-  "camelot":        { score:66, auditors:["Paladin","Solidity Finance"],              hacks:0, bounty:false },
-  "drift":          { score:67, auditors:["Ottersec"],                               hacks:0, bounty:false },
-  "marinade":       { score:72, auditors:["Neodyme"],                                hacks:0, bounty:false },
-  "jito":           { score:70, auditors:["Neodyme","Ottersec"],                     hacks:0, bounty:false },
-  "anzen":          { score:55, auditors:["Halborn"],                                hacks:0, bounty:false },
+  "stargate":       { score:65, auditors:["Quantstamp"],                              hacks:0, bounty:false },
+  "camelot":        { score:66, auditors:["Paladin","Solidity Finance"],               hacks:0, bounty:false },
+  "drift":          { score:67, auditors:["Ottersec"],                                hacks:0, bounty:false },
+  "marinade":       { score:72, auditors:["Neodyme"],                                 hacks:0, bounty:false },
+  "jito":           { score:70, auditors:["Neodyme","Ottersec"],                      hacks:0, bounty:false },
+  "anzen":          { score:55, auditors:["Halborn"],                                 hacks:0, bounty:false },
 };
 
 // ─── COINGECKO ID MAP ─────────────────────────────────────────────────────────
@@ -176,7 +180,9 @@ export const PROTOCOL_COIN_MAP = {
   "aerodrome":     "aerodrome-finance",
 };
 
-// ─── VOLATILITY COIN MAP ──────────────────────────────────────────────────────
+// ─── VOLATILITY COIN MAP (CoinGecko IDs — used as fallback) ──────────────────
+// Maps token symbol → CoinGecko coin ID.
+// Used in PoolRow / PoolModal as secondary key when DeFiLlama vol is unavailable.
 export const VOLATILITY_COIN_MAP = {
   "ETH":   "ethereum",
   "BTC":   "bitcoin",
@@ -195,8 +201,33 @@ export const VOLATILITY_COIN_MAP = {
   "LDO":   "lido-dao",
 };
 
+// ─── VOLATILITY DEFILLAMA MAP ─────────────────────────────────────────────────
+// Maps token symbol → DeFiLlama coin ID for the /chart API.
+// Format: "coingecko:{id}" for listed tokens, "chain:0xaddress" for on-chain only.
+// This is the PRIMARY source for fetchVolatility (no rate limits, no CORS).
+export const VOLATILITY_DEFILLAMA_MAP = {
+  "ETH":    "coingecko:ethereum",
+  "WETH":   "coingecko:ethereum",
+  "BTC":    "coingecko:bitcoin",
+  "SOL":    "coingecko:solana",
+  "BNB":    "coingecko:binancecoin",
+  "ARB":    "coingecko:arbitrum",
+  "OP":     "coingecko:optimism",
+  "AVAX":   "coingecko:avalanche-2",
+  "MATIC":  "coingecko:matic-network",
+  "UNI":    "coingecko:uniswap",
+  "AAVE":   "coingecko:aave",
+  "CRV":    "coingecko:curve-dao-token",
+  "GMX":    "coingecko:gmx",
+  "PENDLE": "coingecko:pendle",
+  "LINK":   "coingecko:chainlink",
+  "LDO":    "coingecko:lido-dao",
+  // On-chain only (not on CoinGecko / DeFiLlama uses chain:address)
+  "ANZ":    "base:0xeeC468333ccc16D4BF1cEf497A56cf8C0aAe4Ca3",
+  "AERO":   "coingecko:aerodrome-finance",
+};
+
 // ─── DEFILLAMA CHAIN NAME MAP ─────────────────────────────────────────────────
-// Maps our chain names to DeFiLlama's chain prefix in the coins API
 export const DEFILLAMA_CHAIN_MAP = {
   "Base":     "base",
   "Arbitrum": "arbitrum",
