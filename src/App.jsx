@@ -25,12 +25,11 @@ export default function App() {
   const [lastUpdate,   setLastUpdate]   = useState(null);
   const [rawPools,     setRawPools]     = useState([]);
   const [poolsLoading, setPoolsLoading] = useState(true);
-  const [uniswapMap,   setUniswapMap]   = useState({});
   const [fdvMap,       setFdvMap]       = useState({});
   // Volatility state
   const [volData,      setVolData]      = useState({});
   const [volLoading,   setVolLoading]   = useState(true);
-  const [dataStatus,   setDataStatus]   = useState({defillama:"loading",coingecko:"loading",uniswap:"loading",fdv:"loading",vol:"loading",curve:"loading",balancer:"loading",aave:"loading",compound:"loading",dune:"loading",certik:"loading",defisafety:"loading"});
+  const [dataStatus,   setDataStatus]   = useState({defillama:"loading",coingecko:"loading",uniswap:"error",fdv:"loading",vol:"loading",curve:"error",balancer:"error",aave:"error",compound:"error",dune:"error",certik:"error",defisafety:"error"});
   const [selectedPool, setSelectedPool] = useState(null);
   const [advisorPool,  setAdvisorPool]  = useState(null);
   const [riskFilter,   setRiskFilter]   = useState("medium");
@@ -72,26 +71,6 @@ export default function App() {
     finally{ setPoolsLoading(false); }
   },[fetchExternal]);
 
-  // ── Fetch Uniswap ──
-  const fetchUniswap = useCallback(async()=>{
-    setDataStatus(s=>({...s,uniswap:"loading"}));
-    const query=`{ pools(first:200,orderBy:volumeUSD,orderDirection:desc){ id token0{symbol} token1{symbol} volumeUSD txCount totalValueLockedUSD } }`;
-    for(const url of [UNISWAP_SUBGRAPH,UNISWAP_ALT]){
-      try{
-        const r=await fetchExternal(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query})});
-        const d=await r.json();
-        if(d.data?.pools?.length){
-          const map={};
-          d.data.pools.forEach(p=>{ map[p.id.toLowerCase()]={txCount:parseInt(p.txCount||0),volumeUSD:parseFloat(p.volumeUSD||0)}; });
-          setUniswapMap(map);
-          setDataStatus(s=>({...s,uniswap:"ok"}));
-          return;
-        }
-      }catch{/* noop */}
-    }
-    setDataStatus(s=>({...s,uniswap:"error"}));
-  },[fetchExternal]);
-
   // ── Fetch FDV ──
   const fetchFdv = useCallback(async()=>{
     setDataStatus(s=>({...s,fdv:"loading"}));
@@ -110,8 +89,8 @@ export default function App() {
   const fetchVolatility = useCallback(async()=>{
     setVolLoading(true);
     setDataStatus(s=>({...s,vol:"loading"}));
-    // Fetch top tokens sequentially to avoid rate limiting
-    const priorityCoins = ["bitcoin","ethereum","solana","arbitrum","optimism","chainlink","uniswap","aave"];
+    // Conservative set to reduce 429 rate limits
+    const priorityCoins = ["bitcoin","ethereum","solana"];
     const result = {};
     for(const coinId of priorityCoins){
       try{
@@ -121,7 +100,7 @@ export default function App() {
         const pArr = (d.prices||[]).map(p=>p[1]);
         const vol  = calcHistoricalVolatility(pArr);
         if(vol) result[coinId] = vol;
-        await new Promise(res=>setTimeout(res,200)); // small delay to avoid rate limit
+        await new Promise(res=>setTimeout(res,1200));
       }catch{/* noop */}
     }
     setVolData(result);
@@ -129,47 +108,36 @@ export default function App() {
     setDataStatus(s=>({...s,vol:Object.keys(result).length>0?"ok":"error"}));
   },[fetchExternal]);
 
-  const pingSource = useCallback(async (url, key) => {
-    setDataStatus(s => ({ ...s, [key]: "loading" }));
-    try {
-      const r = await fetchExternal(url, { method: "GET" });
-      setDataStatus(s => ({ ...s, [key]: r.ok ? "ok" : "error" }));
-    } catch {
-      setDataStatus(s => ({ ...s, [key]: "error" }));
-    }
-  }, [fetchExternal]);
-
   const fetchExtendedSources = useCallback(async () => {
-    await Promise.all([
-      pingSource(CURVE_API, "curve"),
-      pingSource(BALANCER_API, "balancer"),
-      pingSource(AAVE_API, "aave"),
-      pingSource(COMPOUND_API, "compound"),
-      pingSource(DUNE_API, "dune"),
-      pingSource(CERTIK_API, "certik"),
-      pingSource(DEFISAFETY_API, "defisafety"),
-    ]);
-  }, [pingSource]);
+    setDataStatus(s => ({
+      ...s,
+      curve: "error",
+      balancer: "error",
+      aave: "error",
+      compound: "error",
+      dune: "error",
+      certik: "error",
+      defisafety: "error",
+    }));
+  }, []);
 
-  useEffect(()=>{ fetchPrices(); fetchPools(); fetchUniswap(); fetchFdv(); fetchVolatility(); fetchExtendedSources(); },[]);
+  useEffect(()=>{ fetchPrices(); fetchPools(); fetchFdv(); fetchVolatility(); fetchExtendedSources(); },[]);
   useEffect(()=>{ const t=setInterval(fetchPrices,60000); return()=>clearInterval(t); },[]);
 
   // ── Enrich pools with Uniswap + FDV ──
   const allPools = useMemo(()=>{
     if(!rawPools.length) return [];
     return rawPools.map(p=>{
-      const uid=p.pool?.toLowerCase();
-      const uni=uniswapMap[uid]||null;
       const coinId=getProtocolCoinId(p.project);
       const fd=coinId?fdvMap[coinId]:null;
-      const txCount=uni?.txCount||0;
+      const txCount=0;
       const liqScore=calcLiquidityScore({...p,_txCount:txCount});
       const enriched={...p,_txCount:txCount,_liqScore:liqScore,_fdv:fd?.fdv||null,_fdvTvlRatio:fd?.fdv&&p.tvlUsd?fd.fdv/p.tvlUsd:null};
       const withIntelligence = { ...enriched, _fdvRevenueRatio: calcFdvRevenueRatio(enriched) };
       const scored = { ...withIntelligence, _score:calcScore(withIntelligence) };
       return { ...scored, _normalized: normalizePoolModel(scored), _intelligence: buildPoolIntelligence(scored) };
     }).sort((a,b)=>b._score-a._score);
-  },[rawPools,uniswapMap,fdvMap]);
+  },[rawPools,fdvMap]);
 
   const fetchWalletActivePools = useCallback(async (walletAddress) => {
     if (!walletAddress) return [];
@@ -263,7 +231,7 @@ export default function App() {
             {Object.entries(dataStatus).map(([k,s])=><StatusDot key={k} status={s}/>)}
           </div>
           {lastUpdate&&<span style={{fontSize:"8px",color:"#1e2d3d",fontFamily:"monospace"}}>{lastUpdate.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</span>}
-          <button onClick={()=>{fetchPrices();fetchPools();fetchUniswap();fetchFdv();fetchVolatility();}} style={{padding:"4px 10px",borderRadius:"5px",fontSize:"9px",background:"rgba(99,102,241,0.07)",border:"1px solid rgba(99,102,241,0.18)",color:"#4f5bc4",cursor:"pointer",fontFamily:"monospace",letterSpacing:"1px"}}>↻ REFRESH</button>
+          <button onClick={()=>{fetchPrices();fetchPools();fetchFdv();fetchVolatility();}} style={{padding:"4px 10px",borderRadius:"5px",fontSize:"9px",background:"rgba(99,102,241,0.07)",border:"1px solid rgba(99,102,241,0.18)",color:"#4f5bc4",cursor:"pointer",fontFamily:"monospace",letterSpacing:"1px"}}>↻ REFRESH</button>
         </div>
       </div>
 
