@@ -109,11 +109,10 @@ export function AIAdvisorTab({pools, prices, initialPool}) {
           <div ref={endRef}/>
         </div>
         <div style={{padding:"14px",borderTop:"1px solid rgba(255,255,255,0.04)",display:"flex",gap:"8px"}}>
-          <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&send()} placeholder="Pergunte sobre pools, ranges, IL, estratégias..." style={{flex:1,padding:"9px 13px",background:"rgba(0,0,0,0.28)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"9px",color:"#f1f5f9",fontSize:"13px",fontFamily:"Georgia,serif"}}/>
+          <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&send()} placeholder="Pergunte sobre pools, ranges, IL, estratégias..." style={{flex:1,padding:"9px 13px",background:"rgba(0,0,0,0.28)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"9px",color:"#f1f5f9",fontSize:"13px",fontFamily:"Inter, Segoe UI, Roboto, sans-serif"}}/>
           <button onClick={send} disabled={loading||!input.trim()} style={{padding:"9px 16px",borderRadius:"9px",fontSize:"10px",background:loading||!input.trim()?"rgba(99,102,241,0.06)":"rgba(99,102,241,0.2)",border:`1px solid ${loading||!input.trim()?"rgba(99,102,241,0.08)":"rgba(99,102,241,0.35)"}`,color:loading||!input.trim()?"#2d3748":"#a5b4fc",cursor:loading||!input.trim()?"not-allowed":"pointer",fontFamily:"monospace",letterSpacing:"1px"}}>SEND →</button>
         </div>
       </Card>
     </div>
   );
 }
-

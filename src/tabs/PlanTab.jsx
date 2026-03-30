@@ -23,7 +23,7 @@ export function PlanTab() {
       <Card style={{background:"linear-gradient(135deg,#0c1e3d,#070f1a)",border:"1px solid rgba(99,102,241,0.18)"}}>
         <SecTitle icon="🎯">Norte Aspiracional</SecTitle>
         <div style={{display:"flex",gap:"14px",alignItems:"center"}}>
-          <input value={objetivo} onChange={e=>setObjetivo(e.target.value)} style={{fontSize:"24px",fontWeight:700,color:"#a5b4fc",background:"transparent",border:"none",fontFamily:"Georgia,serif",flex:1}}/>
+          <input value={objetivo} onChange={e=>setObjetivo(e.target.value)} style={{fontSize:"24px",fontWeight:700,color:"#a5b4fc",background:"transparent",border:"none",fontFamily:"Inter, Segoe UI, Roboto, sans-serif",flex:1}}/>
           <button onClick={save} style={{padding:"7px 14px",borderRadius:"6px",background:"rgba(99,102,241,0.12)",border:"1px solid rgba(99,102,241,0.28)",color:"#a5b4fc",fontSize:"9px",cursor:"pointer",fontFamily:"monospace",letterSpacing:"1px"}}>SALVAR</button>
         </div>
       </Card>
@@ -32,7 +32,7 @@ export function PlanTab() {
         {acoes.map(a=>(
           <div key={a.id} onClick={()=>setAcoes(p=>p.map(x=>x.id===a.id?{...x,feito:!x.feito}:x))} style={{display:"flex",alignItems:"center",gap:"10px",padding:"10px",borderRadius:"7px",cursor:"pointer",marginBottom:"6px",background:a.feito?"rgba(34,197,94,0.04)":"rgba(0,0,0,0.16)",border:`1px solid ${a.feito?"rgba(34,197,94,0.13)":"rgba(255,255,255,0.04)"}`,opacity:a.feito?0.55:1,transition:"all 0.2s"}}>
             <div style={{width:"16px",height:"16px",borderRadius:"50%",flexShrink:0,border:`2px solid ${a.feito?"#22c55e":"#1e293b"}`,background:a.feito?"#22c55e":"transparent",display:"flex",alignItems:"center",justifyContent:"center"}}>{a.feito&&<span style={{color:"#000",fontSize:"9px",fontWeight:700}}>✓</span>}</div>
-            <input value={a.tarefa} onChange={e=>setAcoes(p=>p.map(x=>x.id===a.id?{...x,tarefa:e.target.value}:x))} onClick={e=>e.stopPropagation()} style={{flex:1,background:"transparent",border:"none",color:a.feito?"#334155":"#94a3b8",fontSize:"12px",fontFamily:"Georgia,serif",textDecoration:a.feito?"line-through":"none"}}/>
+            <input value={a.tarefa} onChange={e=>setAcoes(p=>p.map(x=>x.id===a.id?{...x,tarefa:e.target.value}:x))} onClick={e=>e.stopPropagation()} style={{flex:1,background:"transparent",border:"none",color:a.feito?"#334155":"#94a3b8",fontSize:"12px",fontFamily:"Inter, Segoe UI, Roboto, sans-serif",textDecoration:a.feito?"line-through":"none"}}/>
             <span style={{fontSize:"9px",color:"#2d3748",fontFamily:"monospace",whiteSpace:"nowrap"}}>{a.prazo}</span>
           </div>
         ))}

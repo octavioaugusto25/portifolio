@@ -216,7 +216,7 @@ export default function App() {
   ];
 
   return (
-    <div style={{minHeight:"100vh",background:"#060c14",color:"#e2e8f0",fontFamily:"Georgia,serif"}}>
+    <div style={{minHeight:"100vh",background:"#060c14",color:"#e2e8f0",fontFamily:"Inter, Segoe UI, Roboto, sans-serif"}}>
       <style>{`*{box-sizing:border-box;margin:0;padding:0}@keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}.fade{animation:fadeIn 0.22s ease both}input{outline:none}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:#1a2535;border-radius:2px}`}</style>
 
       {/* Header */}
@@ -271,7 +271,7 @@ export default function App() {
       <div style={{borderBottom:"1px solid rgba(255,255,255,0.04)",padding:"0 22px",background:"#070d18",overflowX:"auto"}}>
         <div style={{maxWidth:"1180px",margin:"0 auto",display:"flex",gap:"1px",minWidth:"max-content"}}>
           {tabs.map(t=>(
-            <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"10px 12px",border:"none",background:tab===t.id?"rgba(99,102,241,0.07)":"transparent",color:tab===t.id?"#8b97e8":"#2d3748",fontSize:"10px",cursor:"pointer",borderBottom:`2px solid ${tab===t.id?"#6366f1":"transparent"}`,transition:"all 0.2s",fontFamily:"Georgia,serif",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:"4px"}}>
+            <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"10px 12px",border:"none",background:tab===t.id?"rgba(99,102,241,0.07)":"transparent",color:tab===t.id?"#8b97e8":"#2d3748",fontSize:"10px",cursor:"pointer",borderBottom:`2px solid ${tab===t.id?"#6366f1":"transparent"}`,transition:"all 0.2s",fontFamily:"Inter, Segoe UI, Roboto, sans-serif",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:"4px"}}>
               {t.label}
               {t.isNew&&<span style={{padding:"1px 4px",background:"rgba(34,197,94,0.12)",borderRadius:"3px",fontSize:"7px",color:"#22c55e",fontFamily:"monospace"}}>NEW</span>}
             </button>
@@ -332,7 +332,7 @@ export default function App() {
           </div>
         )}
 
-        {tab==="portfolio"  && <PortfolioTab pools={allPools} volData={volData} walletPools={walletPools} walletLoading={walletLoading} onFetchWalletPools={fetchWalletActivePools} onSuggestRebuild={(pool)=>suggestRebuildStrategy(pool, volData)}/>}
+        {tab==="portfolio"  && <PortfolioTab pools={allPools} volData={volData} market={market} walletPools={walletPools} walletLoading={walletLoading} onFetchWalletPools={fetchWalletActivePools} onSuggestRebuild={(pool)=>suggestRebuildStrategy(pool, volData)}/>}
         {tab==="volatility" && <VolatilityTab volData={volData} volLoading={volLoading} prices={prices}/>}
         {tab==="ai"         && <AIAdvisorTab  pools={allPools} prices={prices} initialPool={advisorPool} key={advisorPool?.pool}/>}
         {tab==="liquidez"   && <LiquidezTab   pools={allPools} fdvData={fdvMap} dataStatus={dataStatus}/>}
