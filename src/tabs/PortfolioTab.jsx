@@ -69,7 +69,7 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:"14px"}}>
       <Card>
-        <SecTitle icon="🧷" sub="Cole seu endereço para buscar posições LP ativas (Uniswap v3 + fallbacks DeBank)">Carteira on-chain</SecTitle>
+        <SecTitle icon="🧷" sub="Cole seu endereço para buscar posições LP ativas na Base/Ethereum (sem DeBank)">Carteira on-chain</SecTitle>
         <div style={{display:"flex",gap:"8px",marginBottom:"10px"}}>
           <input
             value={walletAddress}
@@ -77,9 +77,9 @@ export function PortfolioTab({pools, volData, walletPools = [], walletLoading = 
             placeholder="0x..."
             style={{flex:1,padding:"8px 10px",background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"7px",color:"#f1f5f9",fontFamily:"monospace",fontSize:"11px"}}
           />
-          <button onClick={()=>onFetchWalletPools?.(walletAddress)} style={{padding:"8px 12px",borderRadius:"7px",fontSize:"10px",background:"rgba(99,102,241,0.15)",border:"1px solid rgba(99,102,241,0.3)",color:"#a5b4fc",cursor:"pointer",fontFamily:"monospace"}}>Buscar pools ativas</button>
+          <button disabled={walletLoading} onClick={()=>onFetchWalletPools?.(walletAddress)} style={{padding:"8px 12px",borderRadius:"7px",fontSize:"10px",background:"rgba(99,102,241,0.15)",border:"1px solid rgba(99,102,241,0.3)",color:"#a5b4fc",cursor:walletLoading?"not-allowed":"pointer",opacity:walletLoading?0.6:1,fontFamily:"monospace"}}>Buscar pools ativas</button>
         </div>
-        {walletLoading&&<div style={{fontSize:"10px",color:"#475569"}}>Buscando posições on-chain e em agregadores...</div>}
+        {walletLoading&&<div style={{fontSize:"10px",color:"#475569"}}>Buscando posições on-chain...</div>}
         {!walletLoading && walletPools.length>0 && (
           <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
             {walletPools.map(wp=>(
