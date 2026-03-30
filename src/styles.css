@@ -11,6 +11,7 @@
   --warn: #f59e0b;
   --danger: #ef4444;
   font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 17px;
 }
 
 html,
@@ -30,7 +31,7 @@ body {
     radial-gradient(1100px 600px at 10% -20%, rgba(99, 102, 241, 0.18), transparent 60%),
     radial-gradient(900px 500px at 100% 0%, rgba(139, 92, 246, 0.12), transparent 55%),
     linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
-  zoom: 1.08;
+  zoom: 1.18;
 }
 
 * {
@@ -102,5 +103,6 @@ select:focus {
 }
 
 @media (max-width: 1200px) {
-  body { zoom: 1; }
+  :root { font-size: 16px; }
+  body { zoom: 1.05; }
 }
