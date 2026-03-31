@@ -47,18 +47,6 @@ export default function App() {
   const [search,       setSearch]       = useState("");
   const [walletPools,  setWalletPools]  = useState([]);
   const [walletLoading,setWalletLoading]= useState(false);
-  const normalizePair = useCallback((sym = "") => sym.toUpperCase().replace(/_/g, "/").split("/").map(t => t.trim()).filter(Boolean).sort().join("/"), []);
-  const scoreLocalMatch = useCallback((symbol = "", project = "", chain = "") => {
-    const symbolNorm = normalizePair(symbol);
-    const projectNorm = project.toLowerCase();
-    const chainNorm = chain.toLowerCase();
-    return allPools.find(p => {
-      const poolSymbol = normalizePair(p.symbol || "");
-      const poolProject = p.project?.toLowerCase() || "";
-      const poolChain = p.chain?.toLowerCase() || "";
-      return symbolNorm && poolSymbol === symbolNorm && (!projectNorm || poolProject.includes(projectNorm)) && (!chainNorm || poolChain === chainNorm);
-    }) || null;
-  }, [allPools, normalizePair]);
 
   // ── Fetch prices ──
   const fetchPrices = useCallback(async()=>{
@@ -222,6 +210,18 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
       return { ...scored, _normalized: normalizePoolModel(scored), _intelligence: buildPoolIntelligence(scored) };
     }).sort((a,b)=>b._score-a._score);
   },[rawPools,fdvMap]);
+  const normalizePair = useCallback((sym = "") => sym.toUpperCase().replace(/_/g, "/").split("/").map(t => t.trim()).filter(Boolean).sort().join("/"), []);
+  const scoreLocalMatch = useCallback((symbol = "", project = "", chain = "") => {
+    const symbolNorm = normalizePair(symbol);
+    const projectNorm = project.toLowerCase();
+    const chainNorm = chain.toLowerCase();
+    return allPools.find(p => {
+      const poolSymbol = normalizePair(p.symbol || "");
+      const poolProject = p.project?.toLowerCase() || "";
+      const poolChain = p.chain?.toLowerCase() || "";
+      return symbolNorm && poolSymbol === symbolNorm && (!projectNorm || poolProject.includes(projectNorm)) && (!chainNorm || poolChain === chainNorm);
+    }) || null;
+  }, [allPools, normalizePair]);
 
   const fetchWalletActivePools = useCallback(async (walletAddress) => {
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) return [];
