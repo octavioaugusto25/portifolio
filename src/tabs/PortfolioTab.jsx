@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { fmt } from "../utils";
 import { Badge, Card, SecTitle } from "../components/primitives";
-import { IndexedPortfolioProbe } from "../components/IndexedPortfolioProbe";
+import { IndexedPortfolioPanel } from "../components/IndexedPortfolioPanel";
 import { readPersisted, writePersisted } from "../persist";
 
 const STORAGE_KEY = "portfolio-positions-clean-v1";
@@ -183,6 +183,33 @@ function buildSpotPosition(asset) {
   };
 }
 
+function buildIndexedLpPosition(item, walletAddress = "") {
+  const [baseToken = "", quoteToken = ""] = String(item.symbol || "").split("/").map((part) => part.trim());
+  return {
+    id: `indexed-${item.id}`,
+    kind: "lp",
+    symbol: item.symbol,
+    protocol: item.protocol || "Indexed LP",
+    chain: item.chain || "Base",
+    tokenId: item.tokenId || "",
+    walletAddress,
+    baseToken,
+    quoteToken,
+    entryPrice: 0,
+    entryPriceSource: "indexed",
+    entryValueUSD: Number(item.entryUsd || 0),
+    valueUSD: Number(item.valueUsd || 0),
+    rangeMin: Number(item.rangeMin || 0) || "",
+    rangeMax: Number(item.rangeMax || 0) || "",
+    feesToken0: Number(item.fees0 || 0),
+    feesToken1: Number(item.fees1 || 0),
+    feeToken0Symbol: item.fee0Symbol || baseToken,
+    feeToken1Symbol: item.fee1Symbol || quoteToken,
+    notes: "",
+    source: "Indexed portfolio",
+  };
+}
+
 function computeRangeStatus(position, currentPrice) {
   const min = Number(position.rangeMin || 0);
   const max = Number(position.rangeMax || 0);
@@ -309,6 +336,29 @@ export function PortfolioTab({ walletPools = [], walletLoading = false, walletDe
     setFeedback(`${assets.length} ativo(s) importado(s) para o portfolio.`);
   };
 
+  const importIndexedAssets = async (assets, walletForLink = "") => {
+    const next = [
+      ...positions.filter((item) => !String(item.id).startsWith("spot-")),
+      ...assets.map((asset) => ({
+        ...buildSpotPosition(asset),
+        walletAddress: walletForLink || "",
+        source: "Indexed portfolio",
+      })),
+    ];
+    await savePositions(next);
+    setFeedback(`${assets.length} ativo(s) indexado(s) adicionados ao portfolio.`);
+  };
+
+  const importIndexedPositions = async (indexedPositions, walletForLink = "") => {
+    const next = [
+      ...positions.filter((item) => !String(item.id).startsWith("indexed-")),
+      ...indexedPositions.map((item) => buildIndexedLpPosition(item, walletForLink)),
+    ];
+    await savePositions(next);
+    if (indexedPositions[0]) setSelectedPositionId(`indexed-${indexedPositions[0].id}`);
+    setFeedback(`${indexedPositions.length} posicao(oes) LP indexada(s) adicionada(s) ao portfolio.`);
+  };
+
   const updatePosition = async (id, patch) => {
     const next = positions.map((item) => (item.id === id ? { ...item, ...patch } : item));
     await savePositions(next);
@@ -374,7 +424,12 @@ export function PortfolioTab({ walletPools = [], walletLoading = false, walletDe
         </div>
       </Card>
 
-      <IndexedPortfolioProbe onFetchIndexedPortfolio={onFetchIndexedPortfolio} />
+      <IndexedPortfolioPanel
+        defaultWallet={walletAddress || "0x7828319afdffb75f26a54e941c787b5f11a9ee34"}
+        onFetchIndexedPortfolio={onFetchIndexedPortfolio}
+        onUseIndexedAssets={importIndexedAssets}
+        onUseIndexedPositions={importIndexedPositions}
+      />
 
       {walletPools.length > 0 && (
         <Card>
