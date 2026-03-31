@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { fmt } from "../utils";
 import { Badge, Card, SecTitle } from "../components/primitives";
-import { IndexedPortfolioPanel } from "../components/IndexedPortfolioPanel";
+import { IndexedPortfolioPanelV2 } from "../components/IndexedPortfolioPanelV2";
 import { readPersisted, writePersisted } from "../persist";
 
 const STORAGE_KEY = "portfolio-positions-clean-v1";
@@ -205,6 +205,7 @@ function buildIndexedLpPosition(item, walletAddress = "") {
     feesToken1: Number(item.fees1 || 0),
     feeToken0Symbol: item.fee0Symbol || baseToken,
     feeToken1Symbol: item.fee1Symbol || quoteToken,
+    feeUsd: Number(item.feeUsd || 0),
     notes: "",
     source: "Indexed portfolio",
   };
@@ -424,7 +425,7 @@ export function PortfolioTab({ walletPools = [], walletLoading = false, walletDe
         </div>
       </Card>
 
-      <IndexedPortfolioPanel
+      <IndexedPortfolioPanelV2
         defaultWallet={walletAddress || "0x7828319afdffb75f26a54e941c787b5f11a9ee34"}
         onFetchIndexedPortfolio={onFetchIndexedPortfolio}
         onUseIndexedAssets={importIndexedAssets}
