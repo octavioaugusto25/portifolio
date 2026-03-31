@@ -29,12 +29,15 @@ const ALLOWED_DOMAINS = [
   "base.llamarpc.com",
   "mainnet.base.org",
   "base-mainnet.g.alchemy.com",
+  "base-rpc.publicnode.com",
   // EVM RPCs — Ethereum
   "eth.llamarpc.com",
   "cloudflare-eth.com",
+  "ethereum-rpc.publicnode.com",
   // EVM RPCs — Arbitrum
   "arbitrum.llamarpc.com",
   "arb1.arbitrum.io",
+  "arbitrum-one-rpc.publicnode.com",
   // EVM RPCs — Polygon
   "polygon.llamarpc.com",
   "polygon-rpc.com",
@@ -42,6 +45,8 @@ const ALLOWED_DOMAINS = [
   // AI
   "api.anthropic.com",
   "api.groq.com",
+  // Indexers
+  "api.sim.dune.com",
   // DeFi protocol APIs (optional, for future tabs)
   "api.curve.fi",
   "api-v3.balancer.fi",
@@ -68,6 +73,7 @@ export default async function handler(req, res) {
   }
 
   const { url, method = "GET", headers: extraHeaders = {}, body = null } = req.body || {};
+  const startedAt = Date.now();
 
   if (!url) {
     res.writeHead(400, { ...CORS, "Content-Type": "application/json" });
@@ -120,6 +126,16 @@ export default async function handler(req, res) {
     outHeaders["Authorization"] = `Bearer ${key}`;
   }
 
+  if (parsed.hostname === "api.sim.dune.com") {
+    const key = process.env.SIM_API_KEY || "";
+    if (!key) {
+      res.writeHead(500, { ...CORS, "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "SIM_API_KEY not configured in env vars" }));
+    }
+    outHeaders["X-Sim-Api-Key"] = key;
+    delete outHeaders["Authorization"];
+  }
+
   // ── Forward request ───────────────────────────────────────────────────────
   const fetchOptions = { method, headers: outHeaders };
 
@@ -132,6 +148,9 @@ export default async function handler(req, res) {
 
     // Read as text — never try to parse JSON here (avoids 500 on RPC binary/text responses)
     const text = await upstream.text();
+    if (!upstream.ok) {
+      console.error("[proxy upstream]", upstream.status, method, url, `responseBytes=${text.length}`, `elapsedMs=${Date.now() - startedAt}`);
+    }
 
     const ct = upstream.headers.get("content-type") || "application/json";
     res.writeHead(upstream.status, {
@@ -141,6 +160,7 @@ export default async function handler(req, res) {
     res.end(text);
 
   } catch (err) {
+    console.error("[proxy error]", method, url, err.message, `elapsedMs=${Date.now() - startedAt}`);
     res.writeHead(502, { ...CORS, "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Upstream fetch failed", detail: err.message }));
   }

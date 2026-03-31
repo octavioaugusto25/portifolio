@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AAVE_API, ARBITRUM_RPC, ARBITRUM_RPC_ALT, BALANCER_API, BASE_RPC, BASE_RPC_ALT, BASE_UNISWAP_V3_NPM, BASE_UNISWAP_V4_POSITIONS_NFT, CERTIK_API, CHAINS_OK, COINGECKO, COMPOUND_API, CURVE_API, DEFILLAMA_YIELDS, DEFISAFETY_API, DUNE_API, ETH_RPC, POLYGON_RPC, POLYGON_RPC_ALT, PROTOCOL_COIN_MAP, TOKEN_DECIMALS_BY_ADDRESS, TOKEN_SYMBOL_BY_ADDRESS, UNISWAP_V3_NPM, WALLET_TRACKED_ASSETS, DEFILLAMA_COINS, 
   BASE_RPC_PUB, ETH_RPC_PUB, ARBITRUM_RPC_PUB,
   DEFILLAMA_CHART,
@@ -11,8 +11,9 @@ import { Badge, CalcTab, Card, Chg, LiquidezTab, PlanTab, PoolModal, PoolRow, Po
 
 
 
-// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ MAIN APP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function App() {
+  const bootedRef = useRef(false);
   const fetchExternal = useCallback(async (url, options = {}) => {
     const r = await fetch("/api/proxy", {
       method: "POST",
@@ -24,6 +25,15 @@ export default function App() {
         body: options.body ?? null,
       }),
     });
+    if (!r.ok) {
+      let detail = "";
+      try {
+        detail = await r.clone().text();
+      } catch {
+        detail = "";
+      }
+      console.error("[proxy]", r.status, url, detail || "(sem detalhe)");
+    }
     return r;
   }, []);
 
@@ -47,8 +57,9 @@ export default function App() {
   const [search,       setSearch]       = useState("");
   const [walletPools,  setWalletPools]  = useState([]);
   const [walletLoading,setWalletLoading]= useState(false);
+  const [walletDebug,  setWalletDebug]  = useState("");
 
-  // ── Fetch prices ──
+  // â”€â”€ Fetch prices â”€â”€
   const fetchPrices = useCallback(async()=>{
     setPricesLoading(true);
     setDataStatus(s=>({...s,coingecko:"loading"}));
@@ -62,7 +73,7 @@ export default function App() {
     finally{ setPricesLoading(false); }
   },[fetchExternal]);
 
-  // ── Fetch pools ──
+  // â”€â”€ Fetch pools â”€â”€
   const fetchPools = useCallback(async()=>{
     setPoolsLoading(true);
     setDataStatus(s=>({...s,defillama:"loading"}));
@@ -79,7 +90,7 @@ export default function App() {
     finally{ setPoolsLoading(false); }
   },[fetchExternal]);
 
-  // ── Fetch FDV ──
+  // â”€â”€ Fetch FDV â”€â”€
 const fdvCacheRef = useRef({ ts: 0, data: {} });
   const fetchFdv = useCallback(async () => {
     const now = Date.now();
@@ -90,7 +101,7 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
     }
     setDataStatus(s => ({ ...s, fdv: "loading" }));
     try {
-      // Reduzido para os 8 tokens mais relevantes — menos chance de 429
+      // Reduzido para os 8 tokens mais relevantes â€” menos chance de 429
       const coreIds = ["uniswap","aave","curve-dao-token","pendle","lido-dao","morpho","aerodrome-finance","gmx"];
       const r = await fetchExternal(
         `${COINGECKO}/coins/markets?vs_currency=usd&ids=${coreIds.join(",")}&order=market_cap_desc&per_page=20`
@@ -107,11 +118,11 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
     }
   }, [fetchExternal]);
  
-  // ── Fetch Volatility — DeFiLlama /chart, 1 coin por vez, só 3 principais ──
-  // DeFiLlama /chart só aceita UM coin no path. Batch não funciona (400).
+  // â”€â”€ Fetch Volatility â€” DeFiLlama /chart, 1 coin por vez, sÃ³ 3 principais â”€â”€
+  // DeFiLlama /chart sÃ³ aceita UM coin no path. Batch nÃ£o funciona (400).
   const volCacheRef = useRef({ ts: 0, data: {} });
   const fetchVolatility = useCallback(async () => {
-    // Cache de 30 min — vol histórica não muda em minutos
+    // Cache de 30 min â€” vol histÃ³rica nÃ£o muda em minutos
     const now = Date.now();
     if (now - volCacheRef.current.ts < 30 * 60 * 1000 && Object.keys(volCacheRef.current.data).length) {
       setVolData(volCacheRef.current.data);
@@ -122,7 +133,7 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
     setVolLoading(true);
     setDataStatus(s => ({ ...s, vol: "loading" }));
     const result = {};
-    // Todos os tokens do VOLATILITY_DEFILLAMA_MAP — DeFiLlama /chart, 1 por vez (sem rate limit)
+    // Todos os tokens do VOLATILITY_DEFILLAMA_MAP â€” DeFiLlama /chart, 1 por vez (sem rate limit)
     const coinsToFetch = Object.entries(VOLATILITY_DEFILLAMA_MAP).map(([sym, llamaId]) => ({ sym, llamaId }));
     const start = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
     for (const { sym, llamaId } of coinsToFetch) {
@@ -133,7 +144,7 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
         if (!r.ok) throw new Error(`${r.status}`);
         const d = await r.json();
         // DeFiLlama /chart returns { coins: { id: { prices: [{timestamp, price}, ...] } } }
-        // NOTE: prices are OBJECTS {timestamp, price} — NOT arrays [ts, price]
+        // NOTE: prices are OBJECTS {timestamp, price} â€” NOT arrays [ts, price]
         const coinData = d.coins?.[llamaId];
         if (!coinData?.prices?.length) continue;
         const prices = coinData.prices.map(p => p.price ?? p[1] ?? 0).filter(v => v > 0);
@@ -143,10 +154,10 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
         const cgId = llamaId.startsWith("coingecko:") ? llamaId.replace("coingecko:", "") : llamaId;
         result[cgId] = vol;
         result[llamaId] = vol;
-        // Guarda também pelo símbolo do token (ex: "AAVE", "CRV") para lookup direto
+        // Guarda tambÃ©m pelo sÃ­mbolo do token (ex: "AAVE", "CRV") para lookup direto
         result[sym] = vol;
         await new Promise(res => setTimeout(res, 400)); // 400ms entre calls
-      } catch {/* noop — tenta próximo */}
+      } catch {/* noop â€” tenta prÃ³ximo */}
     }
     // Se DeFiLlama falhou tudo, fallback CoinGecko sequencial
     if (!Object.keys(result).length) {
@@ -176,17 +187,14 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
     }));
   }, []);
  
-  // ── Boot: ESCALONADO para não sobrecarregar o proxy ──
-  // Tier 1 (imediato): dados críticos para renderizar UI
-  // Tier 2 (+3s):      FDV (menos urgente)
-  // Tier 3 (+6s):      Volatilidade (pode esperar, usa cache de 30min)
+  // Boot enxuto para não bater rate limit no dev/local.
   useEffect(() => {
+    if (bootedRef.current) return;
+    bootedRef.current = true;
     fetchPrices();
     fetchPools();
     fetchExtendedSources();
-    const t2 = setTimeout(() => fetchFdv(),         3_000);
-    const t3 = setTimeout(() => fetchVolatility(),  6_000);
-    return () => { clearTimeout(t2); clearTimeout(t3); };
+    return undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
  
@@ -196,7 +204,7 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
   }, []);
  
 
-  // ── Enrich pools with Uniswap + FDV ──
+  // â”€â”€ Enrich pools with Uniswap + FDV â”€â”€
   const allPools = useMemo(()=>{
     if(!rawPools.length) return [];
     return rawPools.map(p=>{
@@ -223,70 +231,8 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
     }) || null;
   }, [allPools, normalizePair]);
 
-  const fetchWalletActivePools = useCallback(async (walletAddress) => {
-    if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) return [];
-    setWalletLoading(true);
-    const owner = walletAddress.toLowerCase();
-    // Base/Ethereum on-chain only. Avoid public subgraphs here because they can 403/429 in production.
-    const pad64 = (h) => h.replace(/^0x/, "").padStart(64, "0");
-    const addrArg = pad64(walletAddress.toLowerCase().replace(/^0x/, ""));
-    const rpcCall = async (rpcUrl, to, data) => {
-      const payload = { jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] };
-      const r = await fetchExternal(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const d = await r.json();
-      return d?.result || "0x";
-    };
-    const rpcCallWithFallback = async (rpcUrls, to, data) => {
-      for (const rpcUrl of rpcUrls) {
-        try {
-          const result = await rpcCall(rpcUrl, to, data);
-          if (result && result !== "0x") return result;
-        } catch {/* noop */}
-      }
-      return "0x";
-    };
-    try {
-      for (const network of [
-        { name: "Base",     rpcs: [BASE_RPC_PUB, BASE_RPC, BASE_RPC_ALT],    npm: BASE_UNISWAP_V3_NPM, project: "uniswap-base" },
-      { name: "Ethereum", rpcs: [ETH_RPC_PUB, ETH_RPC],                    npm: UNISWAP_V3_NPM,      project: "uniswap"      },
-      ]) {
-        const balHex = await rpcCallWithFallback(network.rpcs, network.npm, `0x70a08231${addrArg}`);
-        const bal = Number(BigInt(balHex || "0x0"));
-        const lim = Math.min(4, bal);
-        const fallback = [];
-        for (let i = 0; i < lim; i++) {
-          const idx = pad64(`0x${i.toString(16)}`);
-          const tokenHex = await rpcCallWithFallback(network.rpcs, network.npm, `0x2f745c59${addrArg}${idx}`);
-          const tokenId = BigInt(tokenHex || "0x0");
-          const tokenIdArg = pad64(`0x${tokenId.toString(16)}`);
-          const pos = await rpcCallWithFallback(network.rpcs, network.npm, `0x99fbab88${tokenIdArg}`);
-          if (!pos || pos === "0x") continue;
-          const chunks = pos.replace(/^0x/, "").match(/.{1,64}/g) || [];
-          const token0 = `0x${chunks[2]?.slice(24) || ""}`.toLowerCase();
-          const token1 = `0x${chunks[3]?.slice(24) || ""}`.toLowerCase();
-          const fee = Number(BigInt(`0x${chunks[4] || "0"}`));
-          const liquidity = BigInt(`0x${chunks[7] || "0"}`);
-          if (liquidity === 0n) continue;
-          const s0 = TOKEN_SYMBOL_BY_ADDRESS[token0] || `${token0.slice(0, 6)}…`;
-          const s1 = TOKEN_SYMBOL_BY_ADDRESS[token1] || `${token1.slice(0, 6)}…`;
-          const symbol = `${s0}/${s1}`;
-          fallback.push({ id: `${network.name.toLowerCase()}-${tokenId.toString()}`, symbol, feeTier: fee, liquidity: liquidity.toString(), tvlUsd: 0, volumeUsd: 0, chain: network.name, source: `${network.name} on-chain`, matchedPool: scoreLocalMatch(symbol, network.project, network.name) });
-        }
-        if (fallback.length > 0) {
-          setWalletPools(fallback);
-          setWalletLoading(false);
-          return fallback;
-        }
-      }
-    } catch {/* noop */}
-    setWalletPools([]);
-    setWalletLoading(false);
-    return [];
-  }, [fetchExternal, scoreLocalMatch]);
-
-  const fetchWalletPoolFromBaseTx = useCallback(async (txHash) => {
-    if (!txHash || !/^0x([A-Fa-f0-9]{64})$/.test(txHash)) return [];
-    setWalletLoading(true);
+  const parseBaseV4PositionFromTx = useCallback(async (txHash, sourcePrefix = "Base tx") => {
+    if (!txHash || !/^0x([A-Fa-f0-9]{64})$/.test(txHash)) return null;
     const rpcCall = async (rpcUrl, method, params) => {
       const payload = { jsonrpc: "2.0", id: 1, method, params };
       const r = await fetchExternal(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -313,16 +259,57 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
       const fractionStr = fraction.toString().padStart(decimals, "0").slice(0, 4).replace(/0+$/, "");
       return fractionStr ? `${whole.toString()}.${fractionStr}` : whole.toString();
     };
+    const parseSignedChunk = (chunk) => {
+      let x = BigInt(`0x${chunk}`);
+      if (x >> 255n) x -= 1n << 256n;
+      return Number(x);
+    };
+    const parseSignedInt32 = (chunk) => {
+      const word = chunk.slice(0, 8);
+      if (!word || word.length !== 8) return null;
+      let value = parseInt(word, 16);
+      if (!Number.isFinite(value)) return null;
+      if (value >= 0x80000000) value -= 0x100000000;
+      return value;
+    };
+    const tokenDecimalsBySymbol = {
+      ETH: 18, WETH: 18, USDC: 6, USDT: 6, DAI: 18, USDZ: 18,
+      BTC: 8, WBTC: 8, cbBTC: 8, SOL: 9,
+    };
+    const tickSpacingByFee = { 100: 1, 500: 10, 3000: 60, 10000: 200 };
+    const priceFromTick = (tick, quoteDecimals, baseDecimals) =>
+      Math.pow(1.0001, tick) * Math.pow(10, baseDecimals - quoteDecimals);
+    const getHistoricalUsdPrice = async (coinId, timestampSec) => {
+      if (!coinId || !timestampSec) return null;
+      const from = Math.max(0, timestampSec - 12 * 3600);
+      const to = timestampSec + 12 * 3600;
+      try {
+        const r = await fetchExternal(`${COINGECKO}/coins/${coinId}/market_chart/range?vs_currency=usd&from=${from}&to=${to}`);
+        if (!r.ok) return null;
+        const d = await r.json();
+        const prices = Array.isArray(d?.prices) ? d.prices : [];
+        if (!prices.length) return null;
+        const targetMs = timestampSec * 1000;
+        let best = prices[0];
+        let bestDelta = Math.abs((prices[0]?.[0] || 0) - targetMs);
+        for (const point of prices) {
+          const delta = Math.abs((point?.[0] || 0) - targetMs);
+          if (delta < bestDelta) {
+            best = point;
+            bestDelta = delta;
+          }
+        }
+        return Number(best?.[1] || 0) || null;
+      } catch {
+        return null;
+      }
+    };
     try {
       const [tx, receipt] = await Promise.all([
         rpcCallWithFallback("eth_getTransactionByHash", [txHash]),
         rpcCallWithFallback("eth_getTransactionReceipt", [txHash]),
       ]);
-      if (!tx || !receipt || receipt.status !== "0x1") {
-        setWalletPools([]);
-        setWalletLoading(false);
-        return [];
-      }
+      if (!tx || !receipt || receipt.status !== "0x1") return null;
       const transferSig = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
       const zeroTopic = `0x${"0".repeat(64)}`;
       const mintedLog = (receipt.logs || []).find(log =>
@@ -352,12 +339,59 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
       if (tx.value && tx.value !== "0x0") tokenSymbols.unshift("ETH");
       const uniqueSymbols = [...new Set(tokenSymbols)].slice(0, 2);
       const symbol = uniqueSymbols.length >= 2 ? `${uniqueSymbols[0]}/${uniqueSymbols[1]}` : uniqueSymbols[0] || "Unknown";
+      const stableSymbols = ["USDC", "USDT", "DAI", "USDBC", "USDZ"];
+      const normalizeToken = (token) => token === "WETH" ? "ETH" : token;
+      const baseTransfer = tokenTransfers.find(t => !stableSymbols.includes(normalizeToken(t.symbol))) || null;
+      const quoteTransfer = tokenTransfers.find(t => stableSymbols.includes(normalizeToken(t.symbol))) || null;
+      const baseToken = normalizeToken(baseTransfer?.symbol || uniqueSymbols[0] || "");
+      const quoteToken = normalizeToken(quoteTransfer?.symbol || uniqueSymbols[1] || "");
+      const baseAmount = baseTransfer ? parseFloat(baseTransfer.formattedAmount || "0") : (tx.value && tx.value !== "0x0" ? parseFloat(formatTokenAmount(tx.value, 18)) : 0);
+      const quoteAmount = quoteTransfer ? parseFloat(quoteTransfer.formattedAmount || "0") : 0;
+      const block = receipt.blockNumber ? await rpcCallWithFallback("eth_getBlockByNumber", [receipt.blockNumber, false]) : null;
+      const txTimestamp = block?.timestamp ? Number(BigInt(block.timestamp)) : null;
+      const baseCoinId = baseToken === "ETH" ? "ethereum" : baseToken === "BTC" || baseToken === "WBTC" || baseToken === "cbBTC" ? "bitcoin" : baseToken === "SOL" ? "solana" : null;
+      const historicalEntryPrice = await getHistoricalUsdPrice(baseCoinId, txTimestamp);
+      const inferredEntryPrice = baseAmount > 0 && quoteAmount > 0 ? quoteAmount / baseAmount : null;
+      const trustTxRatio = !stableSymbols.includes(quoteToken);
+      const entryPrice = historicalEntryPrice || (trustTxRatio ? inferredEntryPrice : null) || null;
+      const entryPriceSource = historicalEntryPrice ? "historical_market" : (trustTxRatio && inferredEntryPrice) ? "tx_ratio" : "unknown";
+      const entryValueUSD = baseAmount > 0 && entryPrice ? (baseAmount * entryPrice) + quoteAmount : null;
       const feeCandidates = (tx.input?.replace(/^0x/, "").match(/.{1,64}/g) || [])
         .map(chunk => Number(BigInt(`0x${chunk}`)))
         .filter(value => [100, 500, 3000, 10000].includes(value));
       const feeTier = feeCandidates[0] || 3000;
+      const inputChunks = tx.input?.replace(/^0x/, "").match(/.{1,64}/g) || [];
+      const tickSpacing = tickSpacingByFee[feeTier] || 1;
+      const tickPairs = [];
+      for (let i = 0; i < inputChunks.length - 1; i++) {
+        const a = parseSignedChunk(inputChunks[i]);
+        const b = parseSignedChunk(inputChunks[i + 1]);
+        const validA = Number.isInteger(a) && Math.abs(a) <= 887272 && a % tickSpacing === 0;
+        const validB = Number.isInteger(b) && Math.abs(b) <= 887272 && b % tickSpacing === 0;
+        if (validA && validB && b > a && (b - a) >= tickSpacing && (b - a) <= 500000) {
+          tickPairs.push({ lower: a, upper: b });
+        }
+      }
+      const compactTickWords = inputChunks
+        .map((chunk) => parseSignedInt32(chunk))
+        .filter((value) => Number.isInteger(value) && Math.abs(value) <= 887272 && value % tickSpacing === 0);
+      const compactTickPairs = [];
+      for (let i = 0; i < compactTickWords.length - 1; i++) {
+        const lower = compactTickWords[i];
+        const upper = compactTickWords[i + 1];
+        if (upper > lower && (upper - lower) >= tickSpacing && (upper - lower) <= 500000) {
+          compactTickPairs.push({ lower, upper, compact: true });
+        }
+      }
+      const detectedTicks = tickPairs.length
+        ? tickPairs[tickPairs.length - 1]
+        : (compactTickPairs.length ? compactTickPairs[compactTickPairs.length - 1] : null);
+      const quoteDecimals = tokenDecimalsBySymbol[quoteToken] ?? 6;
+      const baseDecimals = tokenDecimalsBySymbol[baseToken] ?? 18;
+      const rangeMin = detectedTicks && quoteToken && baseToken ? priceFromTick(detectedTicks.lower, quoteDecimals, baseDecimals) : null;
+      const rangeMax = detectedTicks && quoteToken && baseToken ? priceFromTick(detectedTicks.upper, quoteDecimals, baseDecimals) : null;
       const localMatch = scoreLocalMatch(symbol, "uniswap", "Base");
-      const parsed = [{
+      return {
         id: tokenId ? `base-v4-${tokenId}` : txHash,
         symbol,
         feeTier,
@@ -366,9 +400,22 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
         volumeUsd: 0,
         chain: "Base",
         protocol: "Uniswap v4",
-        source: `Base tx ${txHash.slice(0, 10)}...`,
+        source: `${sourcePrefix} ${txHash.slice(0, 10)}...`,
         tokenId,
         txHash,
+        txTimestamp,
+        entryPrice,
+        entryPriceSource,
+        entryValueUSD,
+        tickLower: detectedTicks?.lower ?? null,
+        tickUpper: detectedTicks?.upper ?? null,
+        rangeMin,
+        rangeMax,
+        rangeSource: detectedTicks?.compact ? "tx_ticks_compact" : detectedTicks ? "tx_ticks" : "unknown",
+        baseToken,
+        quoteToken,
+        baseAmount,
+        quoteAmount,
         positionValueEth: tx.value && tx.value !== "0x0" ? formatTokenAmount(tx.value, 18) : null,
         transfers: tokenTransfers,
         nftContract: BASE_UNISWAP_V4_POSITIONS_NFT,
@@ -377,23 +424,226 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
         apy: localMatch?.apy || 0,
         _liqScore: localMatch?._liqScore || 0,
         _score: localMatch?._score || (symbol.includes("USDC") && symbol.includes("ETH") ? 72 : 55),
-      }];
-      setWalletPools(parsed);
-      setWalletLoading(false);
-      return parsed;
+      };
     } catch {
-      setWalletPools([]);
-      setWalletLoading(false);
-      return [];
+      return null;
     }
   }, [fetchExternal, scoreLocalMatch]);
 
+  const fetchWalletActivePools = useCallback(async (walletAddress) => {
+    if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) return [];
+    setWalletLoading(true);
+    setWalletDebug("Buscando posicoes Uniswap v4 pela wallet na Base...");
+    const owner = walletAddress.toLowerCase();
+    const ownerTopic = `0x${owner.replace(/^0x/, "").padStart(64, "0")}`;
+    const transferSig = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+    const pad64 = (h) => h.replace(/^0x/, "").padStart(64, "0");
+    const addrArg = pad64(owner.replace(/^0x/, ""));
+    const baseRpcCall = async (rpcUrl, method, params) => {
+      const payload = { jsonrpc: "2.0", id: 1, method, params };
+      const r = await fetchExternal(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (!r.ok) {
+        const err = new Error(`RPC ${method} ${r.status}`);
+        err.status = r.status;
+        throw err;
+      }
+      const d = await r.json();
+      return d?.result ?? null;
+    };
+    const baseRpcCallWithFallback = async (rpcUrls, method, params) => {
+      let lastError = null;
+      for (const rpcUrl of rpcUrls) {
+        try {
+          const result = await baseRpcCall(rpcUrl, method, params);
+          if (result != null) return result;
+        } catch (error) {
+          lastError = error;
+          if (error?.status === 413) throw error;
+        }
+      }
+      if (lastError) throw lastError;
+      return null;
+    };
+    const nftRpcUrls = [BASE_RPC_PUB, BASE_RPC, BASE_RPC_ALT];
+    try {
+      let reducedFor413 = false;
+      const latestHex = await baseRpcCallWithFallback(nftRpcUrls, "eth_blockNumber", []);
+      const latestBlock = latestHex ? Number(BigInt(latestHex)) : 0;
+      const scanLookback = 300_000;
+      const minBlock = Math.max(0, latestBlock - scanLookback);
+      const nftLogs = [];
+      let toBlock = latestBlock;
+      let chunkSize = 1_000;
+      while (toBlock >= minBlock) {
+        const fromBlock = Math.max(minBlock, toBlock - chunkSize + 1);
+        let batch = null;
+        try {
+          batch = await baseRpcCallWithFallback(nftRpcUrls, "eth_getLogs", [{
+            fromBlock: `0x${fromBlock.toString(16)}`,
+            toBlock: `0x${toBlock.toString(16)}`,
+            address: BASE_UNISWAP_V4_POSITIONS_NFT,
+            topics: [transferSig, null, ownerTopic],
+          }]);
+        } catch (error) {
+          if (error?.status === 413 && chunkSize > 100) {
+            reducedFor413 = true;
+            chunkSize = Math.max(100, Math.floor(chunkSize / 2));
+            continue;
+          }
+          batch = null;
+        }
+        if (Array.isArray(batch) && batch.length) {
+          nftLogs.push(...batch.slice(-5));
+          if (nftLogs.length >= 5) break;
+        }
+        toBlock = fromBlock - 1;
+      }
+      if (Array.isArray(nftLogs) && nftLogs.length) {
+        const owned = [];
+        for (const log of [...nftLogs].reverse()) {
+          const tokenId = log?.topics?.[3] ? BigInt(log.topics[3]).toString() : null;
+          if (!tokenId) continue;
+          const ownerHex = await baseRpcCallWithFallback(nftRpcUrls, "eth_call", [{
+            to: BASE_UNISWAP_V4_POSITIONS_NFT,
+            data: `0x6352211e${pad64(`0x${BigInt(tokenId).toString(16)}`)}`,
+          }, "latest"]);
+          const currentOwner = ownerHex && ownerHex !== "0x" ? `0x${ownerHex.slice(-40)}`.toLowerCase() : null;
+          if (currentOwner !== owner) continue;
+          const parsed = await parseBaseV4PositionFromTx(log.transactionHash, "Base wallet");
+          if (parsed && !owned.find((item) => item.id === parsed.id)) owned.push({ ...parsed, walletAddress });
+        }
+        if (owned.length) {
+          setWalletPools(owned);
+          setWalletDebug(`Encontrei ${owned.length} posicao(oes) v4 pela wallet${reducedFor413 ? " apos reduzir a busca por blocos" : ""}.`);
+          setWalletLoading(false);
+          return owned;
+        }
+      }
+      if (reducedFor413) {
+        setWalletDebug("A busca da wallet precisou reduzir bastante os blocos por limite do RPC e nao encontrou posicao v4 recente.");
+      }
+    } catch (error) {
+      setWalletDebug(`Falha ao buscar v4 pela wallet: ${error?.message || "erro desconhecido"}`);
+    }
 
-// ── fetchWalletAssets: auto-discover all ERC-20s (including ANZ) via eth_getLogs ──
-// Discovers tokens from Transfer events → batches prices via DeFiLlama → shows everything
+    try {
+      setWalletDebug("Tentando fallback on-chain legado por carteira...");
+      for (const network of [
+        { name: "Base",     rpcs: [BASE_RPC_PUB, BASE_RPC, BASE_RPC_ALT],    npm: BASE_UNISWAP_V3_NPM, project: "uniswap-base" },
+        { name: "Ethereum", rpcs: [ETH_RPC_PUB, ETH_RPC],                    npm: UNISWAP_V3_NPM,      project: "uniswap"      },
+      ]) {
+        const rpcCall = async (rpcUrl, to, data) => {
+          const payload = { jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] };
+          const r = await fetchExternal(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+          const d = await r.json();
+          return d?.result || "0x";
+        };
+        const rpcCallWithFallback = async (rpcUrls, to, data) => {
+          for (const rpcUrl of rpcUrls) {
+            try {
+              const result = await rpcCall(rpcUrl, to, data);
+              if (result && result !== "0x") return result;
+            } catch {/* noop */}
+          }
+          return "0x";
+        };
+        const balHex = await rpcCallWithFallback(network.rpcs, network.npm, `0x70a08231${addrArg}`);
+        const bal = Number(BigInt(balHex || "0x0"));
+        const lim = Math.min(4, bal);
+        const fallback = [];
+        for (let i = 0; i < lim; i++) {
+          const idx = pad64(`0x${i.toString(16)}`);
+          const tokenHex = await rpcCallWithFallback(network.rpcs, network.npm, `0x2f745c59${addrArg}${idx}`);
+          const tokenId = BigInt(tokenHex || "0x0");
+          const tokenIdArg = pad64(`0x${tokenId.toString(16)}`);
+          const pos = await rpcCallWithFallback(network.rpcs, network.npm, `0x99fbab88${tokenIdArg}`);
+          if (!pos || pos === "0x") continue;
+          const chunks = pos.replace(/^0x/, "").match(/.{1,64}/g) || [];
+          const token0 = `0x${chunks[2]?.slice(24) || ""}`.toLowerCase();
+          const token1 = `0x${chunks[3]?.slice(24) || ""}`.toLowerCase();
+          const fee = Number(BigInt(`0x${chunks[4] || "0"}`));
+          const liquidity = BigInt(`0x${chunks[7] || "0"}`);
+          if (liquidity === 0n) continue;
+          const s0 = TOKEN_SYMBOL_BY_ADDRESS[token0] || `${token0.slice(0, 6)}...`;
+          const s1 = TOKEN_SYMBOL_BY_ADDRESS[token1] || `${token1.slice(0, 6)}...`;
+          const symbol = `${s0}/${s1}`;
+          fallback.push({ id: `${network.name.toLowerCase()}-${tokenId.toString()}`, symbol, feeTier: fee, liquidity: liquidity.toString(), tvlUsd: 0, volumeUsd: 0, chain: network.name, source: `${network.name} on-chain`, matchedPool: scoreLocalMatch(symbol, network.project, network.name) });
+        }
+        if (fallback.length > 0) {
+          setWalletPools(fallback);
+          setWalletDebug(`Encontrei ${fallback.length} posicao(oes) pelo fallback on-chain legado.`);
+          setWalletLoading(false);
+          return fallback;
+        }
+      }
+    } catch (error) {
+      setWalletDebug(`Fallback on-chain falhou: ${error?.message || "erro desconhecido"}`);
+    }
+    setWalletPools([]);
+    setWalletDebug("Nao encontrei posicoes pela wallet com a logica atual.");
+    setWalletLoading(false);
+    return [];
+  }, [fetchExternal, parseBaseV4PositionFromTx, scoreLocalMatch]);
+
+  const fetchWalletPoolFromBaseTx = useCallback(async (txHash) => {
+    if (!txHash || !/^0x([A-Fa-f0-9]{64})$/.test(txHash)) return [];
+    setWalletLoading(true);
+    setWalletDebug("Montando posicao a partir da tx da Base...");
+    const parsed = await parseBaseV4PositionFromTx(txHash, "Base tx");
+    const result = parsed ? [parsed] : [];
+    setWalletPools(result);
+    setWalletDebug(parsed ? "Posicao montada com sucesso pela tx." : "Nao consegui montar a posicao por essa tx.");
+    setWalletLoading(false);
+    return result;
+  }, [parseBaseV4PositionFromTx]);
+
+  const fetchIndexedPortfolio = useCallback(async (walletAddress) => {
+    if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+      throw new Error("Carteira invalida.");
+    }
+    const chainIds = "8453,137,42161,1";
+    const [positionsRes, balancesRes] = await Promise.all([
+      fetchExternal(`https://api.sim.dune.com/beta/evm/defi/positions/${walletAddress}?chain_ids=${chainIds}`),
+      fetchExternal(`https://api.sim.dune.com/v1/evm/balances/${walletAddress}?chain_ids=${chainIds}`),
+    ]);
+
+    const parseResponse = async (response, label) => {
+      const text = await response.text();
+      let data = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = { raw: text };
+      }
+      if (!response.ok) {
+        throw new Error(data?.error || data?.message || `${label} falhou com status ${response.status}.`);
+      }
+      return data;
+    };
+
+    const [positionsData, balancesData] = await Promise.all([
+      parseResponse(positionsRes, "DeFi positions"),
+      parseResponse(balancesRes, "Balances"),
+    ]);
+
+    return {
+      walletAddress,
+      positions: positionsData?.positions || positionsData?.defi_positions || positionsData?.items || [],
+      balances: balancesData?.balances || balancesData?.items || balancesData?.tokens || [],
+      raw: {
+        positions: positionsData,
+        balances: balancesData,
+      },
+    };
+  }, [fetchExternal]);
+
+
+// â”€â”€ fetchWalletAssets: curated multichain wallet import â”€â”€
+// Checks tracked tokens directly to avoid oversized RPC payloads in local/prod
 const fetchWalletAssets = useCallback(async (walletAddress) => {
   if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) return [];
   setWalletLoading(true);
+  setWalletDebug("Importando ativos curados da wallet em Base, Ethereum, Arbitrum e Polygon...");
 
   const rpcByChain = {
     Base:     [BASE_RPC_PUB, BASE_RPC, BASE_RPC_ALT],
@@ -405,17 +655,26 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
 
   const rpcCall = async (rpcUrl, method, params) => {
     const payload = { jsonrpc: "2.0", id: 1, method, params };
-    const r = await fetchExternal(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const r = await fetchExternal(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
     if (!r.ok) throw new Error(`${method} failed`);
     const d = await r.json();
     return d?.result;
   };
+
   const rpcCallWithFallback = async (rpcUrls, method, params) => {
     for (const rpcUrl of rpcUrls) {
-      try { const result = await rpcCall(rpcUrl, method, params); if (result != null) return result; } catch {/* noop */}
+      try {
+        const result = await rpcCall(rpcUrl, method, params);
+        if (result != null) return result;
+      } catch {/* noop */}
     }
     return null;
   };
+
   const formatUnits = (rawValue, decimals = 18) => {
     const value = BigInt(rawValue || "0x0");
     if (value === 0n) return 0;
@@ -423,60 +682,22 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
   };
 
   try {
-    // ── Step 1: Auto-discover tokens via ERC-20 Transfer events ─────────────
-    // topics[2] = padded wallet = tokens transferred TO this wallet
-    const transferSig = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-    const paddedAddr  = "0x" + walletAddress.toLowerCase().replace(/^0x/, "").padStart(64, "0");
-
-    // discoveredMap: "Chain:0xaddr" → { chain, address, knownAsset? }
     const discoveredMap = new Map();
-
-    // Seed with all known assets (always check these even if no recent Transfer)
     for (const asset of WALLET_TRACKED_ASSETS) {
-      if (asset.address) {
-        const key = `${asset.chain}:${asset.address.toLowerCase()}`;
-        discoveredMap.set(key, { chain: asset.chain, address: asset.address.toLowerCase(), knownAsset: asset });
-      }
+      if (!asset.address) continue;
+      const key = `${asset.chain}:${asset.address.toLowerCase()}`;
+      discoveredMap.set(key, { chain: asset.chain, address: asset.address.toLowerCase(), knownAsset: asset });
     }
 
-    // Discover unknown tokens from last ~14400 blocks (≈48h on Base/Arbitrum; ≈2 days on Ethereum at ~12s/block = 14400 blocks)
-    for (const [chainName, rpcs] of Object.entries(rpcByChain)) {
-      try {
-        const latestHex = await rpcCallWithFallback(rpcs, "eth_blockNumber", []);
-        if (!latestHex) continue;
-        const latestBlock = Number(BigInt(latestHex));
-        // Ethereum mainnet: ~7200 blocks/day; Base/Arbitrum: ~43200 blocks/day
-        const lookback = chainName === "Ethereum" ? 7200 : 14400;
-        const fromBlock   = Math.max(0, latestBlock - lookback);
-        const logs = await rpcCallWithFallback(rpcs, "eth_getLogs", [{
-          fromBlock: "0x" + fromBlock.toString(16),
-          topics:    [transferSig, null, paddedAddr],
-        }]);
-        if (Array.isArray(logs)) {
-          for (const log of logs) {
-            if (!log.address) continue;
-            const addr = log.address.toLowerCase();
-            const key  = `${chainName}:${addr}`;
-            if (!discoveredMap.has(key)) {
-              discoveredMap.set(key, { chain: chainName, address: addr, knownAsset: null });
-            }
-          }
-        }
-      } catch {/* chain unavailable */}
-    }
-
-    // ── Step 2: Batch price + meta lookup via DeFiLlama Coins API ────────────
     const allLlamaKeys = [];
     for (const { chain, address, knownAsset } of discoveredMap.values()) {
-      const k = knownAsset?.llamaKey?.toLowerCase()
-        || `${chainKeyMap[chain] || chain.toLowerCase()}:${address}`;
+      const k = knownAsset?.llamaKey?.toLowerCase() || `${chainKeyMap[chain] || chain.toLowerCase()}:${address}`;
       allLlamaKeys.push(k);
     }
     const uniqueKeys = [...new Set(allLlamaKeys.filter(Boolean))];
 
-    const llamaPriceMap = {}; // llamaKey → price
-    const llamaMetaMap  = {}; // llamaKey → { symbol, decimals }
-    // DeFiLlama Coins handles up to 100 keys per request
+    const llamaPriceMap = {};
+    const llamaMetaMap = {};
     for (let i = 0; i < uniqueKeys.length; i += 60) {
       const chunk = uniqueKeys.slice(i, i + 60);
       try {
@@ -486,29 +707,29 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
           for (const [key, entry] of Object.entries(data?.coins || {})) {
             const k = key.toLowerCase();
             llamaPriceMap[k] = Number(entry?.price || 0);
-            llamaMetaMap[k]  = { symbol: entry?.symbol || "", decimals: Number(entry?.decimals ?? 18) };
+            llamaMetaMap[k] = { symbol: entry?.symbol || "", decimals: Number(entry?.decimals ?? 18) };
           }
         }
       } catch {/* noop */}
-      if (i + 60 < uniqueKeys.length) await new Promise(res => setTimeout(res, 300));
+      if (i + 60 < uniqueKeys.length) await new Promise((res) => setTimeout(res, 200));
     }
 
-    // ── Step 3: CoinGecko for major tokens (ETH, BTC, ARB…) ─────────────────
     const cgPriceMap = {};
-    const coinIds = [...new Set(WALLET_TRACKED_ASSETS.map(a => a.coinId).filter(Boolean))];
+    const coinIds = [...new Set(WALLET_TRACKED_ASSETS.map((a) => a.coinId).filter(Boolean))];
     if (coinIds.length) {
       try {
         const r = await fetchExternal(`${COINGECKO}/simple/price?ids=${coinIds.join(",")}&vs_currencies=usd`);
         if (r.ok) {
           const data = await r.json();
-          for (const [id, entry] of Object.entries(data || {})) cgPriceMap[id] = Number(entry?.usd || 0);
+          for (const [id, entry] of Object.entries(data || {})) {
+            cgPriceMap[id] = Number(entry?.usd || 0);
+          }
         }
-      } catch {/* DeFiLlama will cover */}
+      } catch {/* noop */}
     }
 
-    // ── Step 4: Check on-chain balances + build assets list ─────────────────
-    const ownerArg = `0x${walletAddress.toLowerCase().replace(/^0x/, "").padStart(64, "0")}`;
-    const assets   = [];
+    const ownerArg = walletAddress.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+    const assets = [];
 
     for (const [, entry] of discoveredMap) {
       const { chain, address, knownAsset } = entry;
@@ -519,16 +740,15 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
       try {
         const callData = `0x70a08231${ownerArg}`;
         rawBalance = await rpcCallWithFallback(rpcs, "eth_call", [{ to: address, data: callData }, "latest"]) || "0x0";
-      } catch {/* skip */}
+      } catch {/* noop */}
 
-      const cKey     = chainKeyMap[chain] || chain.toLowerCase();
+      const cKey = chainKeyMap[chain] || chain.toLowerCase();
       const llamaKey = (knownAsset?.llamaKey || `${cKey}:${address}`).toLowerCase();
-      const meta     = llamaMetaMap[llamaKey];
+      const meta = llamaMetaMap[llamaKey];
       const decimals = knownAsset?.decimals ?? meta?.decimals ?? TOKEN_DECIMALS_BY_ADDRESS[address] ?? 18;
-      const amount   = formatUnits(rawBalance, decimals);
+      const amount = formatUnits(rawBalance, decimals);
       if (!Number.isFinite(amount) || amount <= 0) continue;
 
-      // Price: CoinGecko → DeFiLlama → stable heuristic
       let usdPrice = 0;
       if (knownAsset?.coinId && cgPriceMap[knownAsset.coinId]) {
         usdPrice = cgPriceMap[knownAsset.coinId];
@@ -536,75 +756,81 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
         usdPrice = llamaPriceMap[llamaKey];
       } else {
         const s = (knownAsset?.symbol || meta?.symbol || "").toUpperCase();
-        if (["USDC","USDT","DAI","FRAX","USDZ","USDS","LUSD"].includes(s)) usdPrice = 1;
+        if (["USDC", "USDT", "DAI", "FRAX", "USDZ", "USDS", "LUSD"].includes(s)) usdPrice = 1;
       }
 
       const valueUSD = amount * usdPrice;
-      if (valueUSD < 1 && amount < 0.001) continue;
+      if (valueUSD < 0.5 && amount < 0.00001) continue;
 
-      const symbol = knownAsset?.symbol || meta?.symbol || TOKEN_SYMBOL_BY_ADDRESS[address] || address.slice(0,6) + "…";
-      const defaultScore = (() => {
-        const s = symbol.toUpperCase();
-        if (["USDC","USDT","DAI","FRAX","USDZ"].includes(s)) return 82;
-        if (["ETH","WETH"].includes(s)) return 74;
-        if (["WBTC","CBBTC"].includes(s)) return 70;
-        return 55;
-      })();
+      const symbol = knownAsset?.symbol || meta?.symbol || TOKEN_SYMBOL_BY_ADDRESS[address] || `${address.slice(0, 6)}...`;
+      const upper = symbol.toUpperCase();
+      const defaultScore = ["USDC", "USDT", "DAI", "FRAX", "USDZ"].includes(upper)
+        ? 82
+        : ["ETH", "WETH"].includes(upper)
+          ? 74
+          : ["WBTC", "CBBTC"].includes(upper)
+            ? 70
+            : 55;
 
       assets.push({
-        id:          `asset-${chain}-${symbol}`,
+        id: `asset-${chain}-${symbol}`,
         symbol,
-        protocol:    "Wallet spot",
+        protocol: "Wallet spot",
         chain,
         amount,
-         valueUSD,
-         priceUsd:    usdPrice,
-         priceSource: knownAsset?.coinId && cgPriceMap[knownAsset.coinId] ? "CoinGecko"
-                      : usdPrice > 0 ? "DeFiLlama" : "fallback",
-         source:      "On-chain wallet import",
-         matchedPool: null,
-         apy:         0,
-         _liqScore:   0,
-         _score:      defaultScore,
-       });
+        valueUSD,
+        priceUsd: usdPrice,
+        priceSource: knownAsset?.coinId && cgPriceMap[knownAsset.coinId] ? "CoinGecko" : usdPrice > 0 ? "DeFiLlama" : "fallback",
+        source: "On-chain wallet import",
+        matchedPool: null,
+        apy: 0,
+        _liqScore: 0,
+        _score: defaultScore,
+      });
     }
 
-    // ── Step 5: Native ETH / POL balances ────────────────────────────────────
     for (const [chainName, rpcs] of Object.entries(rpcByChain)) {
-      const nativeAsset = WALLET_TRACKED_ASSETS.find(a => a.chain === chainName && !a.address);
+      const nativeAsset = WALLET_TRACKED_ASSETS.find((a) => a.chain === chainName && !a.address);
       if (!nativeAsset) continue;
-      if (assets.find(a => a.chain === chainName && a.symbol === nativeAsset.symbol)) continue;
+      if (assets.find((a) => a.chain === chainName && a.symbol === nativeAsset.symbol)) continue;
       try {
         const rawBalance = await rpcCallWithFallback(rpcs, "eth_getBalance", [walletAddress, "latest"]) || "0x0";
-        const amount   = formatUnits(rawBalance, 18);
+        const amount = formatUnits(rawBalance, 18);
         if (!Number.isFinite(amount) || amount <= 0) continue;
         const usdPrice = cgPriceMap[nativeAsset.coinId] || 0;
         const valueUSD = amount * usdPrice;
-        if (valueUSD < 1 && amount < 0.001) continue;
+        if (valueUSD < 0.5 && amount < 0.00001) continue;
         assets.push({
-          id: `asset-${chainName}-${nativeAsset.symbol}`, symbol: nativeAsset.symbol,
-          protocol: "Wallet spot", chain: chainName, amount, valueUSD, priceUsd: usdPrice,
-          priceSource: "CoinGecko", source: "On-chain wallet import", matchedPool: null,
-          apy: 0, _liqScore: 0, _score: nativeAsset.symbol === "ETH" ? 74 : 60,
+          id: `asset-${chainName}-${nativeAsset.symbol}`,
+          symbol: nativeAsset.symbol,
+          protocol: "Wallet spot",
+          chain: chainName,
+          amount,
+          valueUSD,
+          priceUsd: usdPrice,
+          priceSource: "CoinGecko",
+          source: "On-chain wallet import",
+          matchedPool: null,
+          apy: 0,
+          _liqScore: 0,
+          _score: nativeAsset.symbol === "ETH" ? 74 : 60,
         });
       } catch {/* noop */}
     }
 
     const merged = assets
       .sort((a, b) => b.valueUSD - a.valueUSD)
-      .filter((asset, index, arr) =>
-        arr.findIndex(o => o.symbol === asset.symbol && o.chain === asset.chain) === index
-      );
+      .filter((asset, index, arr) => arr.findIndex((o) => o.symbol === asset.symbol && o.chain === asset.chain) === index);
 
+    setWalletDebug(merged.length ? `${merged.length} ativo(s) importado(s) da wallet.` : "Nenhum ativo curado encontrado nessa wallet.");
     setWalletLoading(false);
     return merged;
-
-  } catch {
+  } catch (error) {
+    setWalletDebug(`Falha ao importar ativos: ${error?.message || "erro desconhecido"}`);
     setWalletLoading(false);
     return [];
   }
-}, [allPools, fetchExternal]);
-
+}, [fetchExternal]);
   const narratives = detectNarratives(allPools, prices);
   const market     = getMarketContext(prices);
 
@@ -698,7 +924,7 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
         {tab==="pools"&&(
           <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px"}}>
-              {[{range:"75–100",label:"Baixo Risco",color:"#22c55e",n:allPools.filter(p=>p._score>=75).length},{range:"55–74",label:"Risco Médio",color:"#f59e0b",n:allPools.filter(p=>p._score>=55&&p._score<75).length},{range:"35–54",label:"Risco Alto",color:"#f97316",n:allPools.filter(p=>p._score>=35&&p._score<55).length},{range:"0–34",label:"Muito Arriscado",color:"#ef4444",n:allPools.filter(p=>p._score<35).length}].map(r=>(
+              {[{range:"75-100",label:"Baixo Risco",color:"#22c55e",n:allPools.filter(p=>p._score>=75).length},{range:"55-74",label:"Risco Médio",color:"#f59e0b",n:allPools.filter(p=>p._score>=55&&p._score<75).length},{range:"35-54",label:"Risco Alto",color:"#f97316",n:allPools.filter(p=>p._score>=35&&p._score<55).length},{range:"0-34",label:"Muito Arriscado",color:"#ef4444",n:allPools.filter(p=>p._score<35).length}].map(r=>(
                 <div key={r.range} style={{padding:"10px 12px",background:`${r.color}06`,border:`1px solid ${r.color}15`,borderRadius:"9px"}}>
                   <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:"10px",fontWeight:700,color:r.color}}>{r.label}</span><span style={{fontSize:"14px",color:r.color,fontFamily:"monospace",fontWeight:800}}>{r.n}</span></div>
                   <div style={{fontSize:"8px",color:"#1e2d3d",marginTop:"3px",fontFamily:"monospace"}}>Score {r.range}</div>
@@ -751,12 +977,14 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
             volData={volData}
             walletPools={walletPools}
             walletLoading={walletLoading}
+            walletDebug={walletDebug}
             onFetchWalletPools={fetchWalletActivePools}
             onFetchWalletPoolTx={fetchWalletPoolFromBaseTx}
             onFetchWalletAssets={fetchWalletAssets}
+            onFetchIndexedPortfolio={fetchIndexedPortfolio}
             onSuggestRebuild={(pool) => suggestRebuildStrategy(pool, volData)}
-            fetchExternal={fetchExternal}   // ★ NEW
-            prices={prices}                 // ★ NEW
+            fetchExternal={fetchExternal}   // â˜… NEW
+            prices={prices}                 // â˜… NEW
           />
         )}
         {tab==="volatility" && <VolatilityTab volData={volData} volLoading={volLoading} prices={prices} fetchExternal={fetchExternal}/>}
@@ -780,3 +1008,4 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
     </div>
   );
 }
+

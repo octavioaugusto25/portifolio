@@ -244,6 +244,7 @@ export function PoolAnalysisPanel({ pool, volData = {}, prices, fetchExternal, o
   const posType = detectPositionType(pool);
   const canonicalEntry = resolveEntryPrice(pool);
   const marketDataConfirmed = pool.marketDataConfirmed !== false;
+  const txOnlyMode = posType === "lp" && !marketDataConfirmed;
 
   // User-editable state
   const [userEntry,  setUserEntry]  = useState(canonicalEntry != null ? String(canonicalEntry) : "");
@@ -349,6 +350,11 @@ export function PoolAnalysisPanel({ pool, volData = {}, prices, fetchExternal, o
   const ilSev       = ilSeverity(displayIL.ilAbs);
   const ilBreakeven = displayIL.ilAbs;
   const ilCovered   = apy != null ? apy >= ilBreakeven : null;
+  const txOnlyAction = rangeStatus
+    ? (rangeStatus.inRange
+        ? "Posição ativa no range definido. Acompanhe a saída do range antes de remontar."
+        : "Posição fora do range definido. O próximo passo é remontar a faixa ao redor do preço atual.")
+    : "Defina range min/max para transformar esta posição em um gerenciador útil de remontagem.";
 
   // AI prompt
   const buildPrompt = useCallback(() => {
@@ -510,27 +516,49 @@ ${lines}`;
           </div>
         )}
 
-        {/* S1: Pool Metrics */}
-        <div>
-          <SectionHeader color="#3b82f6">📊 Dados do Pool</SectionHeader>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
-            {apy != null
-              ? <MetricBox label="APY" value={`${apy.toFixed(1)}%`}
-                  color={apy > 80 ? "#ef4444" : apy > 40 ? "#f59e0b" : "#22c55e"}
-                  sub={feeResult.dataSource === "apy_fallback" ? "inclui rewards" : undefined} />
-              : <NA label="APY" reason={marketDataConfirmed ? "indisponível" : "não confirmado para esta v4"} />
-            }
-            {tvl ? <MetricBox label="TVL" value={fmtK(tvl)} color="#3b82f6" /> : <NA label="TVL" reason="indisponível" />}
-            {analysis.vol24h
-              ? <MetricBox label="VOL 24H" value={fmtK(analysis.vol24h)} color={analysis.vol24h > 1e6 ? "#22c55e" : "#f59e0b"}
-                  sub={feeResult.volTvlRatio != null ? `${feeResult.volTvlRatio.toFixed(1)}% vol/TVL` : undefined} />
-              : <NA label="VOL 24H" reason={marketDataConfirmed ? "sem dados" : "não confirmado para esta v4"} />
-            }
-            <MetricBox label="LIQUIDEZ" value={liq.label} color={liq.color} />
-          </div>
-        </div>
+        {!txOnlyMode && (
+          <>
+            {/* S1: Pool Metrics */}
+            <div>
+              <SectionHeader color="#3b82f6">📊 Dados do Pool</SectionHeader>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
+                {apy != null
+                  ? <MetricBox label="APY" value={`${apy.toFixed(1)}%`}
+                      color={apy > 80 ? "#ef4444" : apy > 40 ? "#f59e0b" : "#22c55e"}
+                      sub={feeResult.dataSource === "apy_fallback" ? "inclui rewards" : undefined} />
+                  : <NA label="APY" reason={marketDataConfirmed ? "indisponível" : "não confirmado para esta v4"} />
+                }
+                {tvl ? <MetricBox label="TVL" value={fmtK(tvl)} color="#3b82f6" /> : <NA label="TVL" reason="indisponível" />}
+                {analysis.vol24h
+                  ? <MetricBox label="VOL 24H" value={fmtK(analysis.vol24h)} color={analysis.vol24h > 1e6 ? "#22c55e" : "#f59e0b"}
+                      sub={feeResult.volTvlRatio != null ? `${feeResult.volTvlRatio.toFixed(1)}% vol/TVL` : undefined} />
+                  : <NA label="VOL 24H" reason={marketDataConfirmed ? "sem dados" : "não confirmado para esta v4"} />
+                }
+                <MetricBox label="LIQUIDEZ" value={liq.label} color={liq.color} />
+              </div>
+            </div>
 
-        <Divider />
+            <Divider />
+          </>
+        )}
+
+        {txOnlyMode && (
+          <div>
+            <SectionHeader color="#6366f1">🎯 Gerenciador da Posição</SectionHeader>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px", marginBottom: "10px" }}>
+              {currentPrice
+                ? <MetricBox label={`PREÇO ATUAL ${baseToken || ""}`} value={usd(currentPrice)} color="#f1f5f9" />
+                : <NA label="PREÇO ATUAL" reason="token não mapeado" />
+              }
+              {entryForEngine
+                ? <MetricBox label="ENTRADA LP" value={usd(entryForEngine)} color="#f59e0b" sub={currentPrice ? pct(((currentPrice - entryForEngine) / entryForEngine) * 100) + " vs entrada" : undefined} />
+                : <NA label="ENTRADA LP" reason="não identificada" />
+              }
+              <MetricBox label="POSIÇÃO ATUAL" value={usd(parseFloat(userPos) || pool.valueUSD || 0, 0)} color="#3b82f6" />
+              <MetricBox label="AÇÃO" value={rangeStatus ? (rangeStatus.inRange ? "MANTER" : "REMONTAR") : "DEFINIR RANGE"} color={rangeStatus ? (rangeStatus.inRange ? "#22c55e" : "#f59e0b") : "#94a3b8"} sub={txOnlyAction} />
+            </div>
+          </div>
+        )}
 
         {/* S2: Price & Range (LP only) */}
         {posType === "lp" && (
@@ -652,7 +680,7 @@ ${lines}`;
 
         {/* S3: IL + Fees (LP only) */}
         {posType === "lp" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: txOnlyMode ? "1fr" : "1fr 1fr", gap: "14px" }}>
 
             {/* IL */}
             <div>
@@ -728,6 +756,7 @@ ${lines}`;
             </div>
 
             {/* Fees */}
+            {!txOnlyMode && (
             <div>
               <SectionHeader color="#22c55e">💰 Análise de Fees</SectionHeader>
 
@@ -801,13 +830,14 @@ ${lines}`;
                 </div>
               )}
             </div>
+            )}
           </div>
         )}
 
-        <Divider />
+        {!txOnlyMode && <Divider />}
 
         {/* S4: Decision Engine */}
-        <div>
+        {!txOnlyMode && <div>
           <SectionHeader color={decision.color}>{decision.icon} DECISÃO — {decision.action}</SectionHeader>
           <div style={{
             padding: "14px",
@@ -848,12 +878,12 @@ ${lines}`;
               </div>
             )}
           </div>
-        </div>
+        </div>}
 
-        <Divider />
+        {!txOnlyMode && <Divider />}
 
         {/* S5: AI Advisor */}
-        <div ref={aiRef}>
+        {!txOnlyMode && <div ref={aiRef}>
           <SectionHeader color="#a5b4fc">🤖 AI Advisor</SectionHeader>
 
           {/* Static summary — always shown, no API call */}
@@ -902,7 +932,7 @@ ${lines}`;
               )}
             </div>
           )}
-        </div>
+        </div>}
 
         {/* Disclaimer */}
         <div style={{ fontSize: "8px", color: "#1e2d3d", lineHeight: 1.6, textAlign: "center", paddingTop: "4px" }}>
