@@ -275,8 +275,9 @@ export function PoolAnalysisPanel({ pool, volData = {}, prices, fetchExternal, o
 
   // Current price from live prices
   const tokens     = extractTokens(sym);
+  const normalizedBaseToken = String(pool.baseTokenSymbol || "").toUpperCase();
   const volTokens  = tokens.filter(t => !isStable(t) && VOLATILITY_COIN_MAP[t]);
-  const baseToken  = volTokens[0] || null;
+  const baseToken  = normalizedBaseToken || volTokens[0] || null;
   const priceMap   = { ETH: prices?.ethereum?.usd, BTC: prices?.bitcoin?.usd, SOL: prices?.solana?.usd };
   const currentPrice = baseToken ? (priceMap[baseToken] ?? null) : null;
 
@@ -484,6 +485,29 @@ ${lines}`;
             text="Posição identificada pela tx/NFT. Entrada, par, fee tier e aporte estão corretos, mas TVL, volume e APY desse pool v4 ainda não foram confirmados. O painel abaixo usa só dados confiáveis."
             level="info"
           />
+        )}
+        {(pool.txHash || pool.tokenId || pool.baseAmount || pool.quoteAmount) && (
+          <div>
+            <SectionHeader color="#7dd3fc">🧾 Dados Confirmados</SectionHeader>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
+              {pool.tokenId
+                ? <MetricBox label="NFT / TOKEN ID" value={`#${pool.tokenId}`} color="#7dd3fc" sub={pool.protocol || "posição LP"} />
+                : <NA label="NFT / TOKEN ID" reason="não identificado" />
+              }
+              {pool.baseAmount > 0
+                ? <MetricBox label={`APORTE ${pool.baseTokenSymbol || ""}`} value={String(pool.baseAmount)} color="#f59e0b" sub="detectado na tx" />
+                : <NA label="APORTE BASE" reason="não identificado" />
+              }
+              {pool.quoteAmount > 0
+                ? <MetricBox label={`APORTE ${pool.quoteTokenSymbol || ""}`} value={String(pool.quoteAmount)} color="#22c55e" sub="detectado na tx" />
+                : <NA label="APORTE QUOTE" reason="não identificado" />
+              }
+              {pool.entryValueUSD
+                ? <MetricBox label="VALOR NA ENTRADA" value={usd(pool.entryValueUSD)} color="#3b82f6" sub="estimado pela composição inicial" />
+                : <NA label="VALOR NA ENTRADA" reason="sem composição suficiente" />
+              }
+            </div>
+          </div>
         )}
 
         {/* S1: Pool Metrics */}

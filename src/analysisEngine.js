@@ -45,10 +45,19 @@ export const isValidPositive = (v) => typeof v === "number" && isFinite(v) && v 
  */
 export function resolveEntryPrice(pos) {
   if (!pos) return null;
-  // avgCostUSD wins if valid
+  const posType = detectPositionType(pos);
+  // LP analysis must use the volatile asset entry price, never total position cost.
+  const lpEntry = Number(pos.lpEntryPrice);
+  if (posType === "lp") {
+    if (isValidPrice(lpEntry)) return lpEntry;
+    const lpLegacy = Number(pos.entryPrice);
+    if (isValidPrice(lpLegacy)) return lpLegacy;
+    return null;
+  }
+  // avgCostUSD wins for spot positions
   const avg = Number(pos.avgCostUSD);
   if (isValidPrice(avg)) return avg;
-  // legacy entryPrice field
+  // legacy entryPrice field for spot/legacy records
   const entr = Number(pos.entryPrice);
   if (isValidPrice(entr)) return entr;
   return null;
@@ -427,6 +436,7 @@ export function computeDecision({
   annualVol,
   apy,
   posType,
+  marketDataConfirmed = true,
 }) {
   const { feeAPR, dataSource: feeSource, reliable: feeReliable } = feeResult;
   const hasIL      = ilResult != null;
@@ -550,7 +560,7 @@ export function computeDecision({
   }
 
   // ── RULE 6: MONITOR_SCORE ─────────────────────────────────────────────────
-  if (score < 45) {
+  if (marketDataConfirmed && score < 45) {
     return {
       action:     "MONITOR",
       urgency:    "medium",
@@ -581,7 +591,7 @@ export function computeDecision({
   const missing = [];
   if (!hasIL) missing.push("preço de entrada (LP)");
   if (!hasRange) missing.push("range min/max");
-  if (!hasFeeAPR) missing.push("volume 24h");
+  if (!hasFeeAPR) missing.push(marketDataConfirmed ? "volume 24h" : "TVL/APY/volume reais do pool");
   return {
     action:     "HOLD",
     urgency:    "low",
@@ -781,6 +791,7 @@ export function runPositionAnalysis({
     annualVol,
     apy,
     posType,
+    marketDataConfirmed,
   });
 
   // ── Static summary ────────────────────────────────────────────────────────

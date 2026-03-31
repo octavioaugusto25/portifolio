@@ -28,6 +28,36 @@ export function PortfolioTab({
   const [rebuildAdvice, setRebuildAdvice] = useState(null);
   const [selectedWalletPool, setSelectedWalletPool] = useState(null);
   const [analysisPool, setAnalysisPool] = useState(null);
+  const isLpLike = (pos) => String(pos?.symbol || "").includes("/") || Number(pos?.feeTier) > 0;
+  const deriveWalletPoolMetrics = (wp) => {
+    const transfers = wp?.transfers || [];
+    const normalizeToken = (token) => token === "WETH" ? "ETH" : token;
+    const stableSymbols = ["USDC", "USDT", "DAI", "USDBC"];
+    const baseTransfer = transfers.find(t => !stableSymbols.includes(normalizeToken(t.symbol))) || null;
+    const quoteTransfer = transfers.find(t => stableSymbols.includes(normalizeToken(t.symbol))) || null;
+    const baseTokenSymbol = normalizeToken(baseTransfer?.symbol || wp?.symbol?.split("/")?.[0] || "");
+    const quoteTokenSymbol = normalizeToken(quoteTransfer?.symbol || wp?.symbol?.split("/")?.[1] || "");
+    const baseAmount = baseTransfer ? parseFloat(baseTransfer.formattedAmount) : (wp?.positionValueEth ? parseFloat(wp.positionValueEth) : 0);
+    const quoteAmount = quoteTransfer ? parseFloat(quoteTransfer.formattedAmount) : 0;
+    const ethPrice = prices?.ethereum?.usd || 0;
+    const tokenPriceMap = { ETH: ethPrice, BTC: prices?.bitcoin?.usd || 0, SOL: prices?.solana?.usd || 0 };
+    const basePriceNow = tokenPriceMap[baseTokenSymbol] || 0;
+    const entryPrice = baseAmount > 0 && quoteAmount > 0 ? (quoteAmount / baseAmount) : null;
+    const valueUSD = wp?.valueUSD || (baseAmount > 0 ? (baseAmount * basePriceNow + quoteAmount) : 0);
+    const entryValueUSD = baseAmount > 0 && entryPrice != null
+      ? (baseAmount * entryPrice + quoteAmount)
+      : valueUSD;
+    return {
+      baseTokenSymbol,
+      quoteTokenSymbol,
+      baseAmount,
+      quoteAmount,
+      entryPrice,
+      valueUSD,
+      entryValueUSD,
+      ethPrice,
+    };
+  };
 
   const importWalletAssets = async () => {
     const imported = await onFetchWalletAssets?.(walletAddress);
@@ -125,29 +155,28 @@ export function PortfolioTab({
   };
   const addWalletPoolToPortfolio = (wp) => {
     if (!wp) return;
-    const transfers = wp.transfers || [];
-    const ethTransfer = transfers.find(t => ["ETH","WETH"].includes(t.symbol));
-    const stableTransfer = transfers.find(t => ["USDC","USDT","DAI"].includes(t.symbol));
-    const ethAmt = ethTransfer ? parseFloat(ethTransfer.formattedAmount) : (wp.positionValueEth ? parseFloat(wp.positionValueEth) : 0);
-    const stableAmt = stableTransfer ? parseFloat(stableTransfer.formattedAmount) : 0;
-    const ethPrice = prices?.ethereum?.usd || 0;
-    const valueUSD = wp.valueUSD || ((ethAmt || 0) * ethPrice + (stableAmt || 0));
-    const entryPrice = ethAmt > 0 && stableAmt > 0 ? (stableAmt / ethAmt) : (prices?.ethereum?.usd || 0);
+    const metrics = deriveWalletPoolMetrics(wp);
     const entry = {
       id: `tracked-${wp.id}`,
       symbol: wp.symbol,
       protocol: wp.protocol || wp.matchedPool?.project || "LP position",
       chain: wp.chain || wp.matchedPool?.chain || "Base",
-      valueUSD: Number(valueUSD || 0),
-      entryPrice: Number(entryPrice || 0),
+      valueUSD: Number(metrics.valueUSD || 0),
+      entryValueUSD: Number(metrics.entryValueUSD || 0),
+      entryPrice: Number(metrics.entryPrice || 0),
+      lpEntryPrice: Number(metrics.entryPrice || 0),
       entryDate: new Date().toISOString().slice(0,10),
       tokenContract: wp.nftContract || "",
-      quantity: 1,
-      avgCostUSD: Number(valueUSD || 0),
+      quantity: 0,
+      avgCostUSD: 0,
       notes: wp.txHash ? `Tx ${wp.txHash}` : "Imported from on-chain position",
       feeTier: wp.feeTier || 3000,
       txHash: wp.txHash || "",
       tokenId: wp.tokenId || "",
+      baseTokenSymbol: metrics.baseTokenSymbol,
+      quoteTokenSymbol: metrics.quoteTokenSymbol,
+      baseAmount: metrics.baseAmount,
+      quoteAmount: metrics.quoteAmount,
       source: wp.source || "On-chain",
       marketDataConfirmed: wp.marketDataConfirmed !== false,
       matchedPool: wp.matchedPool || null,
@@ -171,6 +200,7 @@ export function PortfolioTab({
 
   // total invested cost (sum of avgCostUSD * quantity or valueUSD as fallback)
   const totalCost = positions.reduce((a,p)=> {
+    if (isLpLike(p)) return a + (Number(p.entryValueUSD) || Number(p.valueUSD) || 0);
     if(p.avgCostUSD && p.quantity) return a + p.avgCostUSD * p.quantity;
     if(p.entryPrice && p.quantity) return a + p.entryPrice * p.quantity;
     return a + (p.valueUSD||0);
@@ -232,37 +262,7 @@ export function PortfolioTab({
               );
             })}
             {selectedWalletPool && (() => {
-              const transfers = selectedWalletPool.transfers || [];
-              
-              // ETH pode vir como valor nativo da tx (positionValueEth) OU como transfer WETH
-              const ethTransfer = transfers.find(t => ["ETH","WETH"].includes(t.symbol));
-              const usdcTransfer = transfers.find(t => ["USDC","USDT","DAI"].includes(t.symbol));
-              
-              // positionValueEth é o ETH nativo enviado na tx (tx.value)
-              const ethAmt = ethTransfer
-                ? parseFloat(ethTransfer.formattedAmount)
-                : selectedWalletPool.positionValueEth
-                  ? parseFloat(selectedWalletPool.positionValueEth)
-                  : null;
-              const usdcAmt = usdcTransfer ? parseFloat(usdcTransfer.formattedAmount) : null;
-
-              const ethPrice = prices?.ethereum?.usd || 0;
-
-              // entryPrice = USDC / ETH  OU  preço atual como fallback
-              const derivedEntryPrice = (ethAmt && usdcAmt && ethAmt > 0)
-                ? usdcAmt / ethAmt
-                : ethPrice || null;
-
-              // valueUSD = ETH × preço + USDC  OU  positionValueEth × preço como fallback
-              const derivedValueUSD = (() => {
-                if (ethAmt && ethPrice) {
-                  return ethAmt * ethPrice + (usdcAmt || 0);
-                }
-                if (selectedWalletPool.positionValueEth) {
-                  return parseFloat(selectedWalletPool.positionValueEth) * ethPrice;
-                }
-                return selectedWalletPool.valueUSD || 0;
-              })();
+              const metrics = deriveWalletPoolMetrics(selectedWalletPool);
 
               return (
                 <div style={{ marginTop: "10px" }}>
@@ -270,9 +270,15 @@ export function PortfolioTab({
                     key={selectedWalletPool.id}
                     pool={{
                       ...selectedWalletPool,
-                      entryPrice: derivedEntryPrice,
-                      _entryPrice: derivedEntryPrice,
-                      valueUSD: derivedValueUSD,
+                      entryPrice: metrics.entryPrice,
+                      lpEntryPrice: metrics.entryPrice,
+                      _entryPrice: metrics.entryPrice,
+                      valueUSD: metrics.valueUSD,
+                      entryValueUSD: metrics.entryValueUSD,
+                      baseTokenSymbol: metrics.baseTokenSymbol,
+                      quoteTokenSymbol: metrics.quoteTokenSymbol,
+                      baseAmount: metrics.baseAmount,
+                      quoteAmount: metrics.quoteAmount,
                       feeTier: selectedWalletPool.feeTier || 3000,
                       rangeMin: null,
                       rangeMax: null,
@@ -447,9 +453,14 @@ export function PortfolioTab({
               const volToks=tokens2.filter(t=>!isStable(t)&&VOLATILITY_COIN_MAP[t]);
               const posVol=volToks.length>0?(volToks.map(t=>volData[VOLATILITY_COIN_MAP[t]]?.annualVol).filter(Boolean).reduce((a,b)=>a+b,0)/volToks.length):null;
               const vl=getVolLabel(posVol);
-              const costBasis = pos.avgCostUSD ? Number(pos.avgCostUSD) : (pos.entryPrice||0);
-              const currentPerToken = pos.quantity>0 ? (pos.valueUSD||0) / pos.quantity : 0;
-              const positionPnLPct = costBasis>0&&currentPerToken>0 ? ((currentPerToken-costBasis)/costBasis)*100 : null;
+              const lpLike = isLpLike(pos);
+              const costBasis = lpLike
+                ? (Number(pos.entryValueUSD) || Number(pos.valueUSD) || 0)
+                : (pos.avgCostUSD ? Number(pos.avgCostUSD) : (pos.entryPrice||0));
+              const currentComparable = lpLike
+                ? Number(pos.valueUSD || 0)
+                : (pos.quantity>0 ? (pos.valueUSD||0) / pos.quantity : 0);
+              const positionPnLPct = costBasis>0&&currentComparable>0 ? ((currentComparable-costBasis)/costBasis)*100 : null;
               const isExpanded = expandedId===pos.id;
               return (
                 <div key={pos.id} style={{marginBottom:"4px"}}>
@@ -574,9 +585,9 @@ export function PortfolioTab({
                         />
                       </div>
                       {/* quick P&L detail */}
-                      {pos.quantity>0&&costBasis>0&&(
+                      {(lpLike || pos.quantity>0)&&costBasis>0&&(
                         <div style={{marginTop:"10px",padding:"8px 12px",background:"rgba(0,0,0,0.2)",borderRadius:"7px",display:"flex",gap:"20px",fontSize:"10px"}}>
-                          <div><div style={{fontSize:"8px",color:"#2d3748",fontFamily:"monospace"}}>CUSTO TOTAL</div><div style={{color:"#94a3b8",fontFamily:"monospace",fontWeight:600}}>${fmt(costBasis*(pos.quantity||0),2)}</div></div>
+                          <div><div style={{fontSize:"8px",color:"#2d3748",fontFamily:"monospace"}}>CUSTO TOTAL</div><div style={{color:"#94a3b8",fontFamily:"monospace",fontWeight:600}}>${fmt(lpLike ? costBasis : costBasis*(pos.quantity||0),2)}</div></div>
                           <div><div style={{fontSize:"8px",color:"#2d3748",fontFamily:"monospace"}}>VALOR ATUAL</div><div style={{color:"#3b82f6",fontFamily:"monospace",fontWeight:600}}>${fmt(pos.valueUSD,2)}</div></div>
                           {positionPnLPct!=null&&(
                             <div><div style={{fontSize:"8px",color:"#2d3748",fontFamily:"monospace"}}>P&L</div><div style={{color:positionPnLPct>=0?"#22c55e":"#ef4444",fontFamily:"monospace",fontWeight:700}}>{positionPnLPct>=0?"+":""}{fmt(positionPnLPct,2)}%</div></div>
