@@ -47,6 +47,18 @@ export default function App() {
   const [search,       setSearch]       = useState("");
   const [walletPools,  setWalletPools]  = useState([]);
   const [walletLoading,setWalletLoading]= useState(false);
+  const normalizePair = useCallback((sym = "") => sym.toUpperCase().replace(/_/g, "/").split("/").map(t => t.trim()).filter(Boolean).sort().join("/"), []);
+  const scoreLocalMatch = useCallback((symbol = "", project = "", chain = "") => {
+    const symbolNorm = normalizePair(symbol);
+    const projectNorm = project.toLowerCase();
+    const chainNorm = chain.toLowerCase();
+    return allPools.find(p => {
+      const poolSymbol = normalizePair(p.symbol || "");
+      const poolProject = p.project?.toLowerCase() || "";
+      const poolChain = p.chain?.toLowerCase() || "";
+      return symbolNorm && poolSymbol === symbolNorm && (!projectNorm || poolProject.includes(projectNorm)) && (!chainNorm || poolChain === chainNorm);
+    }) || null;
+  }, [allPools, normalizePair]);
 
   // ── Fetch prices ──
   const fetchPrices = useCallback(async()=>{
@@ -215,15 +227,6 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) return [];
     setWalletLoading(true);
     const owner = walletAddress.toLowerCase();
-    const scoreLocalMatch = (symbol = "", project = "") => {
-      const symbolNorm = symbol.toUpperCase().replace(/_/g, "/");
-      const projectNorm = project.toLowerCase();
-      return allPools.find(p => {
-        const poolSymbol = p.symbol?.toUpperCase().replace(/_/g, "/") || "";
-        const poolProject = p.project?.toLowerCase() || "";
-        return (symbolNorm && (poolSymbol.includes(symbolNorm) || symbolNorm.includes(poolSymbol))) || (projectNorm && poolProject.includes(projectNorm));
-      }) || null;
-    };
     // Base/Ethereum on-chain only. Avoid public subgraphs here because they can 403/429 in production.
     const pad64 = (h) => h.replace(/^0x/, "").padStart(64, "0");
     const addrArg = pad64(walletAddress.toLowerCase().replace(/^0x/, ""));
@@ -267,7 +270,7 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
           const s0 = TOKEN_SYMBOL_BY_ADDRESS[token0] || `${token0.slice(0, 6)}…`;
           const s1 = TOKEN_SYMBOL_BY_ADDRESS[token1] || `${token1.slice(0, 6)}…`;
           const symbol = `${s0}/${s1}`;
-          fallback.push({ id: `${network.name.toLowerCase()}-${tokenId.toString()}`, symbol, feeTier: fee, liquidity: liquidity.toString(), tvlUsd: 0, volumeUsd: 0, chain: network.name, source: `${network.name} on-chain`, matchedPool: scoreLocalMatch(symbol, network.project) });
+          fallback.push({ id: `${network.name.toLowerCase()}-${tokenId.toString()}`, symbol, feeTier: fee, liquidity: liquidity.toString(), tvlUsd: 0, volumeUsd: 0, chain: network.name, source: `${network.name} on-chain`, matchedPool: scoreLocalMatch(symbol, network.project, network.name) });
         }
         if (fallback.length > 0) {
           setWalletPools(fallback);
@@ -279,7 +282,7 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
     setWalletPools([]);
     setWalletLoading(false);
     return [];
-  }, [allPools, fetchExternal]);
+  }, [fetchExternal, scoreLocalMatch]);
 
   const fetchWalletPoolFromBaseTx = useCallback(async (txHash) => {
     if (!txHash || !/^0x([A-Fa-f0-9]{64})$/.test(txHash)) return [];
@@ -353,10 +356,7 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
         .map(chunk => Number(BigInt(`0x${chunk}`)))
         .filter(value => [100, 500, 3000, 10000].includes(value));
       const feeTier = feeCandidates[0] || 3000;
-      const localMatch = allPools.find(p => {
-        const poolSymbol = p.symbol?.toUpperCase().replace(/_/g, "/") || "";
-        return poolSymbol.includes(symbol.toUpperCase()) || symbol.toUpperCase().includes(poolSymbol);
-      }) || null;
+      const localMatch = scoreLocalMatch(symbol, "uniswap", "Base");
       const parsed = [{
         id: tokenId ? `base-v4-${tokenId}` : txHash,
         symbol,
@@ -385,7 +385,7 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
       setWalletLoading(false);
       return [];
     }
-  }, [allPools, fetchExternal]);
+  }, [fetchExternal, scoreLocalMatch]);
 
 
 // ── fetchWalletAssets: auto-discover all ERC-20s (including ANZ) via eth_getLogs ──
@@ -542,10 +542,6 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
       if (valueUSD < 1 && amount < 0.001) continue;
 
       const symbol = knownAsset?.symbol || meta?.symbol || TOKEN_SYMBOL_BY_ADDRESS[address] || address.slice(0,6) + "…";
-      const localMatch = allPools.find(p => {
-        const poolSymbol = p.symbol?.toUpperCase().replace(/_/g, "/") || "";
-        return poolSymbol.includes(symbol.toUpperCase());
-      }) || null;
       const defaultScore = (() => {
         const s = symbol.toUpperCase();
         if (["USDC","USDT","DAI","FRAX","USDZ"].includes(s)) return 82;
@@ -560,16 +556,16 @@ const fetchWalletAssets = useCallback(async (walletAddress) => {
         protocol:    "Wallet spot",
         chain,
         amount,
-        valueUSD,
-        priceUsd:    usdPrice,
-        priceSource: knownAsset?.coinId && cgPriceMap[knownAsset.coinId] ? "CoinGecko"
-                     : usdPrice > 0 ? "DeFiLlama" : "fallback",
-        source:      "On-chain wallet import",
-        matchedPool: localMatch,
-        apy:         0,
-        _liqScore:   localMatch?._liqScore || 0,
-        _score:      localMatch?._score || defaultScore,
-      });
+         valueUSD,
+         priceUsd:    usdPrice,
+         priceSource: knownAsset?.coinId && cgPriceMap[knownAsset.coinId] ? "CoinGecko"
+                      : usdPrice > 0 ? "DeFiLlama" : "fallback",
+         source:      "On-chain wallet import",
+         matchedPool: null,
+         apy:         0,
+         _liqScore:   0,
+         _score:      defaultScore,
+       });
     }
 
     // ── Step 5: Native ETH / POL balances ────────────────────────────────────
