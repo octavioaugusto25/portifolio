@@ -243,6 +243,7 @@ export function PoolAnalysisPanel({ pool, volData = {}, prices, fetchExternal, o
 
   const posType = detectPositionType(pool);
   const canonicalEntry = resolveEntryPrice(pool);
+  const marketDataConfirmed = pool.marketDataConfirmed !== false;
 
   // User-editable state
   const [userEntry,  setUserEntry]  = useState(canonicalEntry != null ? String(canonicalEntry) : "");
@@ -259,12 +260,13 @@ export function PoolAnalysisPanel({ pool, volData = {}, prices, fetchExternal, o
   const aiRef = useRef(null);
 
   // Pool source data
-  const src   = pool.matchedPool || pool;
+  const src   = marketDataConfirmed ? (pool.matchedPool || pool) : pool;
   const sym   = (pool.symbol  || src.symbol  || "").toUpperCase().replace(/_/g, "/");
   const proj  = src.project   || pool.protocol || "—";
   const chain = src.chain     || pool.chain    || "—";
-  const apy   = Number(src.apy    || pool.apy    || 0);
-  const tvl   = Number(src.tvlUsd || pool.tvlUsd || 0) || null;
+  const rawApy = marketDataConfirmed ? Number(src.apy || pool.apy || 0) : 0;
+  const apy   = rawApy > 0 ? rawApy : null;
+  const tvl   = marketDataConfirmed ? (Number(src.tvlUsd || pool.tvlUsd || 0) || null) : null;
   const score = Number(src._score || pool._score || 0);
   const liq   = getLiqLabel(src._liqScore || pool._liqScore || 0);
   const risk  = getRisk(score);
@@ -314,10 +316,11 @@ export function PoolAnalysisPanel({ pool, volData = {}, prices, fetchExternal, o
   // Run full analysis
   const analysis = runPositionAnalysis({
     position:     positionForEngine,
-    matchedPool:  pool.matchedPool || null,
+    matchedPool:  marketDataConfirmed ? (pool.matchedPool || null) : null,
     currentPrice,
     annualVol,
     suggestedRange,
+    marketDataConfirmed,
   });
 
   const {
@@ -344,13 +347,13 @@ export function PoolAnalysisPanel({ pool, volData = {}, prices, fetchExternal, o
   })();
   const ilSev       = ilSeverity(displayIL.ilAbs);
   const ilBreakeven = displayIL.ilAbs;
-  const ilCovered   = apy >= ilBreakeven;
+  const ilCovered   = apy != null ? apy >= ilBreakeven : null;
 
   // AI prompt
   const buildPrompt = useCallback(() => {
     const lines = [
       `Pool: ${sym} | ${proj} | ${chain} | Tipo: ${posType === "lp" ? "LP" : "Spot"}`,
-      `Score: ${qualityScore}/100 | APY: ${apy.toFixed(1)}%`,
+      `Score: ${qualityScore}/100 | APY: ${apy != null ? `${apy.toFixed(1)}%` : "N/A"}`,
       `TVL: ${tvl ? fmtK(tvl) : "N/A"} | Vol 24h: ${analysis.vol24h ? fmtK(analysis.vol24h) : "N/A"}`,
       posType === "lp" && ilResult
         ? `IL real: ${ilResult.il.toFixed(2)}% (ratio ${ilResult.ratio.toFixed(3)}×, ${ilSeverity(ilResult.ilAbs).label}) | Breakeven APY: ${ilResult.ilAbs.toFixed(1)}%`
@@ -369,6 +372,7 @@ export function PoolAnalysisPanel({ pool, volData = {}, prices, fetchExternal, o
         ? `Resultado líquido vs hold: ${netResult.netDailyUSD >= 0 ? "+" : ""}${formatUSD(netResult.netDailyUSD)}/dia (${netResult.annualizedPct?.toFixed(1) ?? "?"}%/aa)`
         : "",
       annualVol ? `Vol histórica ${baseToken}: ${annualVol.toFixed(0)}%/aa` : "",
+      !marketDataConfirmed ? "Market data: posição identificada por tx/NFT, sem TVL/APY/volume confirmados para esse pool v4." : "",
       `Decisão: ${decision.action} — ${decision.reason}`,
     ].filter(Boolean).join("\n");
 
@@ -388,7 +392,7 @@ Estrutura (4 parágrafos curtos):
 
 Dados:
 ${lines}`;
-  }, [sym, proj, chain, posType, qualityScore, apy, tvl, analysis.vol24h, ilResult, rangeStatus, feeResult, netResult, annualVol, decision, baseToken]);
+  }, [sym, proj, chain, posType, qualityScore, apy, tvl, analysis.vol24h, ilResult, rangeStatus, feeResult, netResult, annualVol, decision, baseToken, marketDataConfirmed]);
 
   const fetchAI = useCallback(async () => {
     if (!fetchExternal || aiLoading) return;
@@ -396,17 +400,18 @@ ${lines}`;
     setAiAsked(true);
     setAiText("");
     try {
-      const r = await fetchExternal("https://api.anthropic.com/v1/messages", {
+      const r = await fetchExternal("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514", max_tokens: 600,
-          system: "DeFi quantitative advisor. Be direct and decisive. Use exact numbers. Never say 'consider' — give clear actions. Respond in Brazilian Portuguese (pt-BR).",
-          messages: [{ role: "user", content: buildPrompt() }],
+          model: "openai/gpt-oss-120b",
+          max_tokens: 600,
+          temperature: 0.3,
+          messages: [{ role: "system", content: "DeFi quantitative advisor. Be direct and decisive. Use exact numbers. Never say 'consider' and give clear actions. Respond in Brazilian Portuguese (pt-BR)." }, { role: "user", content: buildPrompt() }],
         }),
       });
       const d = await r.json();
-      setAiText(d.content?.find(b => b.type === "text")?.text || "Sem resposta do modelo.");
+      setAiText(d.choices?.[0]?.message?.content || (d.error?.message ? `⚠ ${d.error.message}` : "Sem resposta do modelo."));
     } catch {
       setAiText("⚠ Erro de conexão. O resumo automático acima contém a análise completa.");
     } finally {
@@ -474,19 +479,28 @@ ${lines}`;
 
         {/* NET RESULT — most important metric, shown first */}
         {posType === "lp" && <NetResultBanner netResult={netResult} feeResult={feeResult} />}
+        {!marketDataConfirmed && (
+          <WarningBanner
+            text="Posição identificada pela tx/NFT. Entrada, par, fee tier e aporte estão corretos, mas TVL, volume e APY desse pool v4 ainda não foram confirmados. O painel abaixo usa só dados confiáveis."
+            level="info"
+          />
+        )}
 
         {/* S1: Pool Metrics */}
         <div>
           <SectionHeader color="#3b82f6">📊 Dados do Pool</SectionHeader>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
-            <MetricBox label="APY" value={`${apy.toFixed(1)}%`}
-              color={apy > 80 ? "#ef4444" : apy > 40 ? "#f59e0b" : "#22c55e"}
-              sub={feeResult.dataSource === "apy_fallback" ? "inclui rewards" : undefined} />
+            {apy != null
+              ? <MetricBox label="APY" value={`${apy.toFixed(1)}%`}
+                  color={apy > 80 ? "#ef4444" : apy > 40 ? "#f59e0b" : "#22c55e"}
+                  sub={feeResult.dataSource === "apy_fallback" ? "inclui rewards" : undefined} />
+              : <NA label="APY" reason={marketDataConfirmed ? "indisponível" : "não confirmado para esta v4"} />
+            }
             {tvl ? <MetricBox label="TVL" value={fmtK(tvl)} color="#3b82f6" /> : <NA label="TVL" reason="indisponível" />}
             {analysis.vol24h
               ? <MetricBox label="VOL 24H" value={fmtK(analysis.vol24h)} color={analysis.vol24h > 1e6 ? "#22c55e" : "#f59e0b"}
                   sub={feeResult.volTvlRatio != null ? `${feeResult.volTvlRatio.toFixed(1)}% vol/TVL` : undefined} />
-              : <NA label="VOL 24H" reason="sem dados — fees calculados via APY" />
+              : <NA label="VOL 24H" reason={marketDataConfirmed ? "sem dados" : "não confirmado para esta v4"} />
             }
             <MetricBox label="LIQUIDEZ" value={liq.label} color={liq.color} />
           </div>
@@ -661,14 +675,14 @@ ${lines}`;
                   <MetricBox
                     label="BREAKEVEN APY MÍNIMO"
                     value={`≥ ${ilBreakeven.toFixed(1)}%`}
-                    color={ilCovered ? "#22c55e" : "#ef4444"}
-                    sub={`APY pool atual: ${apy.toFixed(1)}%`}
+                    color={ilCovered == null ? "#94a3b8" : ilCovered ? "#22c55e" : "#ef4444"}
+                    sub={apy != null ? `APY pool atual: ${apy.toFixed(1)}%` : "sem APY confiável"}
                   />
                   <MetricBox
                     label="IL COBERTO PELO APY?"
-                    value={ilCovered ? "✅ Sim" : "❌ Não"}
-                    color={ilCovered ? "#22c55e" : "#ef4444"}
-                    sub="APY inclui rewards"
+                    value={ilCovered == null ? "—" : ilCovered ? "✅ Sim" : "❌ Não"}
+                    color={ilCovered == null ? "#94a3b8" : ilCovered ? "#22c55e" : "#ef4444"}
+                    sub={apy != null ? "APY inclui rewards" : "aguardando market data real"}
                   />
                 </div>
               </div>
@@ -805,7 +819,8 @@ ${lines}`;
                 📋 Para análise de alta confiança, adicione:{" "}
                 {!entryForEngine && posType === "lp" && "• Preço de entrada LP "}
                 {!rangeStatus && posType === "lp" && "• Range min/max "}
-                {!analysis.vol24h && "• Volume 24h (via DeFiLlama — pode demorar) "}
+                {!marketDataConfirmed && "• TVL/APY/volume reais do pool v4 "}
+                {marketDataConfirmed && !analysis.vol24h && "• Volume 24h (via DeFiLlama — pode demorar) "}
               </div>
             )}
           </div>

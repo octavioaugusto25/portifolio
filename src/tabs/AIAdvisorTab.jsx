@@ -4,7 +4,7 @@ import { Badge, Card, Spin } from "../components/primitives";
 
 // ─── AI ADVISOR ───────────────────────────────────────────────────────────────
 // fetchExternal: proxy wrapper do App.jsx — injeta a API key server-side.
-// Sem isso, a chamada à Anthropic falha com 401 em produção.
+// Sem isso, a chamada à Groq falha em produção.
 export function AIAdvisorTab({ pools, prices, initialPool, fetchExternal }) {
   const [messages,   setMessages]   = useState([]);
   const [input,      setInput]      = useState("");
@@ -49,18 +49,21 @@ export function AIAdvisorTab({ pools, prices, initialPool, fetchExternal }) {
     const caller = fetchExternal || ((url, opts) => fetch(url, opts));
 
     try {
-      const r = await caller("https://api.anthropic.com/v1/messages", {
+      const r = await caller("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "openai/gpt-oss-120b",
           max_tokens: 1000,
-          system: buildSystem(),
-          messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
+          temperature: 0.3,
+          messages: [
+            { role: "system", content: buildSystem() },
+            ...newMsgs.map(m => ({ role: m.role, content: m.content })),
+          ],
         }),
       });
       const d = await r.json();
-      const text_ = d.content?.find(b => b.type === "text")?.text;
+      const text_ = d.choices?.[0]?.message?.content;
       setMessages(p => [...p, {
         role: "assistant",
         content: text_ || (d.error ? `⚠ Erro API: ${d.error.message || d.error}` : "Sem resposta.")

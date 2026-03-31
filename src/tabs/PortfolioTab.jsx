@@ -75,10 +75,26 @@ export function PortfolioTab({
     const ok = await writePersisted(STORAGE_KEY, JSON.stringify(pos));
     if(ok){ setSaved(true); setTimeout(()=>setSaved(false),2000); }
   };
+  const normalizePairKey = (value = "") => value.toUpperCase().replace(/_/g,"/").split("/").map(t => t.trim()).filter(Boolean).sort().join("/");
+  const findExactPoolMatch = (positionLike) => {
+    if (!positionLike?.symbol) return null;
+    const symbolKey = normalizePairKey(positionLike.symbol);
+    const protocolKey = String(positionLike.protocol || "").toLowerCase();
+    const chainKey = String(positionLike.chain || "").toLowerCase();
+    return pools.find(p => {
+      const poolSymbolKey = normalizePairKey(p.symbol || "");
+      const poolProject = String(p.project || "").toLowerCase();
+      const poolChain = String(p.chain || "").toLowerCase();
+      const normalizedProtocolKey = protocolKey.replace("-v4", "").replace("-v3", "").replace("-base", "");
+      const protocolOk = !normalizedProtocolKey || poolProject.includes(normalizedProtocolKey);
+      const chainOk = !chainKey || poolChain === chainKey;
+      return symbolKey && poolSymbolKey === symbolKey && protocolOk && chainOk;
+    }) || null;
+  };
 
   const addPosition = () => {
     if(!newPos.symbol||!newPos.valueUSD) return;
-    const matchPool = pools.find(p=>p.symbol?.toLowerCase().replace(/_/g,"/").includes(newPos.symbol.toLowerCase())||newPos.symbol.toLowerCase().includes(p.project?.toLowerCase()));
+    const matchPool = findExactPoolMatch(newPos);
     const enriched = {
       id: Date.now(), ...newPos,
       valueUSD: Number(newPos.valueUSD),
@@ -104,6 +120,42 @@ export function PortfolioTab({
 
   const updatePosition = (id, field, value) => {
     const updated = positions.map(p => p.id===id ? {...p, [field]: value} : p);
+    setPositions(updated);
+    save(updated);
+  };
+  const addWalletPoolToPortfolio = (wp) => {
+    if (!wp) return;
+    const transfers = wp.transfers || [];
+    const ethTransfer = transfers.find(t => ["ETH","WETH"].includes(t.symbol));
+    const stableTransfer = transfers.find(t => ["USDC","USDT","DAI"].includes(t.symbol));
+    const ethAmt = ethTransfer ? parseFloat(ethTransfer.formattedAmount) : (wp.positionValueEth ? parseFloat(wp.positionValueEth) : 0);
+    const stableAmt = stableTransfer ? parseFloat(stableTransfer.formattedAmount) : 0;
+    const ethPrice = prices?.ethereum?.usd || 0;
+    const valueUSD = wp.valueUSD || ((ethAmt || 0) * ethPrice + (stableAmt || 0));
+    const entryPrice = ethAmt > 0 && stableAmt > 0 ? (stableAmt / ethAmt) : (prices?.ethereum?.usd || 0);
+    const entry = {
+      id: `tracked-${wp.id}`,
+      symbol: wp.symbol,
+      protocol: wp.protocol || wp.matchedPool?.project || "LP position",
+      chain: wp.chain || wp.matchedPool?.chain || "Base",
+      valueUSD: Number(valueUSD || 0),
+      entryPrice: Number(entryPrice || 0),
+      entryDate: new Date().toISOString().slice(0,10),
+      tokenContract: wp.nftContract || "",
+      quantity: 1,
+      avgCostUSD: Number(valueUSD || 0),
+      notes: wp.txHash ? `Tx ${wp.txHash}` : "Imported from on-chain position",
+      feeTier: wp.feeTier || 3000,
+      txHash: wp.txHash || "",
+      tokenId: wp.tokenId || "",
+      source: wp.source || "On-chain",
+      marketDataConfirmed: wp.marketDataConfirmed !== false,
+      matchedPool: wp.matchedPool || null,
+      _score: wp.matchedPool?._score || wp._score || 55,
+      _liqScore: wp.matchedPool?._liqScore || wp._liqScore || 0,
+      apy: wp.matchedPool?.apy || wp.apy || 0,
+    };
+    const updated = [...positions.filter(p => p.id !== entry.id), entry];
     setPositions(updated);
     save(updated);
   };
@@ -171,7 +223,9 @@ export function PortfolioTab({
                     <div><div style={{fontSize:"11px",fontWeight:600,color:"#94a3b8"}}>{wp.symbol}</div><div style={{fontSize:"9px",color:"#2d3748"}}>{wp.chain} · {wp.source}</div></div>
                     <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
                       {wp.feeTier&&<Badge color="#6366f1" sm>{wp.feeTier/10000}% fee</Badge>}
-                      {wp.matchedPool&&<Badge color={risk2.color} sm>Score {wp.matchedPool._score||"?"}</Badge>}
+                      {wp.marketDataConfirmed !== false && wp.matchedPool&&<Badge color={risk2.color} sm>Score {wp.matchedPool._score||"?"}</Badge>}
+                      {wp.marketDataConfirmed === false && <Badge color="#94a3b8" sm>Dados via tx</Badge>}
+                      <button onClick={(e)=>{e.stopPropagation();addWalletPoolToPortfolio(wp);}} style={{padding:"4px 8px",borderRadius:"6px",fontSize:"9px",background:"rgba(34,197,94,0.12)",border:"1px solid rgba(34,197,94,0.25)",color:"#86efac",cursor:"pointer",fontFamily:"monospace"}}>Adicionar</button>
                     </div>
                   </div>
                 </div>
@@ -580,10 +634,9 @@ export function PortfolioTab({
       pool={{
         // pass saved position fields through
         ...analysisPool,
-        matchedPool: pools.find(p =>
-          p.symbol?.toLowerCase().replace(/_/g,"/").includes(analysisPool.symbol?.toLowerCase()) ||
-          analysisPool.symbol?.toLowerCase().includes(p.project?.toLowerCase())
-        ) || null,
+        matchedPool: analysisPool.marketDataConfirmed === false
+          ? null
+          : (analysisPool.matchedPool || findExactPoolMatch(analysisPool)),
       }}
       volData={volData}
       prices={prices}

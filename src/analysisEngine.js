@@ -714,8 +714,9 @@ export function runPositionAnalysis({
   currentPrice,
   annualVol,
   suggestedRange,
+  marketDataConfirmed = true,
 }) {
-  const src = matchedPool || position;
+  const src = marketDataConfirmed ? (matchedPool || position) : position;
 
   // ── Detect position type ──────────────────────────────────────────────────
   const posType = detectPositionType(position);
@@ -724,11 +725,12 @@ export function runPositionAnalysis({
   const entryPrice = resolveEntryPrice(position);
 
   // ── Pool data (prefer matchedPool for real on-chain data) ─────────────────
-  const tvl         = Number(src?.tvlUsd      || position?.tvlUsd      || 0) || null;
-  const rawVol7d    = Number(src?.volumeUsd7d  || position?.volumeUsd7d || 0);
+  const tvl         = marketDataConfirmed ? (Number(src?.tvlUsd || position?.tvlUsd || 0) || null) : null;
+  const rawVol7d    = marketDataConfirmed ? Number(src?.volumeUsd7d || position?.volumeUsd7d || 0) : 0;
   // Only use volume data if it actually exists
   const vol24h      = rawVol7d > 0 ? rawVol7d / 7 : null;
-  const apy         = Number(src?.apy || position?.apy || 0);
+  const rawApy      = marketDataConfirmed ? Number(src?.apy || position?.apy || 0) : 0;
+  const apy         = rawApy > 0 ? rawApy : null;
   const score       = Number(src?._score || position?._score || 0);
   const feeTierBps  = Number(position?.feeTier || src?.feeTier || 3000);
   const posValueUSD = Number(position?.valueUSD || 0) || null;

@@ -6,13 +6,13 @@
  *
  * O que faz:
  *   - Repassa requisições do frontend para APIs externas (CORS bypass)
- *   - Injeta ANTHROPIC_API_KEY automaticamente quando o destino é api.anthropic.com
+ *   - Injeta chaves de IA automaticamente quando o destino é Anthropic ou Groq
  *   - Allowlist de domínios: só deixa passar o que está na lista
  *   - Não tenta parsear JSON — manda a resposta crua de volta (evita os 500)
  *
  * Como configurar no Vercel:
  *   1. Vá em Project → Settings → Environment Variables
- *   2. Adicione:  ANTHROPIC_API_KEY = sk-ant-...
+ *   2. Adicione:  GROQ_API_KEY = gsk_...
  *   3. Faça redeploy
  */
 
@@ -41,6 +41,7 @@ const ALLOWED_DOMAINS = [
   "rpc-mainnet.matic.network",
   // AI
   "api.anthropic.com",
+  "api.groq.com",
   // DeFi protocol APIs (optional, for future tabs)
   "api.curve.fi",
   "api-v3.balancer.fi",
@@ -107,6 +108,16 @@ export default async function handler(req, res) {
     outHeaders["anthropic-version"]   = "2023-06-01";
     // Remove any key the frontend might have tried to send
     delete outHeaders["Authorization"];
+  }
+
+  // Inject Groq key from env — OpenAI-compatible API
+  if (parsed.hostname === "api.groq.com") {
+    const key = process.env.GROQ_API_KEY || "";
+    if (!key) {
+      res.writeHead(500, { ...CORS, "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "GROQ_API_KEY not configured in Vercel env vars" }));
+    }
+    outHeaders["Authorization"] = `Bearer ${key}`;
   }
 
   // ── Forward request ───────────────────────────────────────────────────────

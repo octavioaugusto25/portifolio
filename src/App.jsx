@@ -373,6 +373,7 @@ const fdvCacheRef = useRef({ ts: 0, data: {} });
         transfers: tokenTransfers,
         nftContract: BASE_UNISWAP_V4_POSITIONS_NFT,
         matchedPool: localMatch,
+        marketDataConfirmed: false,
         apy: localMatch?.apy || 0,
         _liqScore: localMatch?._liqScore || 0,
         _score: localMatch?._score || (symbol.includes("USDC") && symbol.includes("ETH") ? 72 : 55),
